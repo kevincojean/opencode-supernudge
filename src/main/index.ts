@@ -1,5 +1,4 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import type { Part } from "@opencode-ai/sdk"
 import { parse as parseJsonc } from "jsonc-parser"
 import type { ParseError } from "jsonc-parser"
 import fs from "node:fs"
@@ -93,17 +92,13 @@ const plugin: Plugin = async (_input, options) => {
         interval <= 1 ||
         (count - 1) % interval === 0
       if (!shouldInject) return
-      const part: Part = {
-        id: "",
-        sessionID: input.sessionID,
-        messageID: input.messageID ?? "",
-        type: "text",
-        text: nudgeText,
-      }
+      const existing = output.parts.find(p => p.type === "text" && "text" in p)
+      if (!existing) return
+      const target = existing as { text: string }
       if (config["position.normalMessage"] === "end") {
-        output.parts.push(part)
+        target.text = target.text + "\n\n" + nudgeText
       } else {
-        output.parts.unshift(part)
+        target.text = nudgeText + "\n\n" + target.text
       }
     },
     "experimental.chat.system.transform": async (input, output) => {

@@ -136,14 +136,10 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, output)
 
-    assert.strictEqual(output.parts.length, 2)
+    assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
       (output.parts[0] as { text: string }).text,
-      "user-text",
-    )
-    assert.strictEqual(
-      (output.parts[1] as { text: string }).text,
-      "NUDGE",
+      "user-text\n\nNUDGE",
     )
   },
 )
@@ -369,10 +365,10 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, output)
 
-    assert.strictEqual(output.parts.length, 2)
+    assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
       (output.parts[0] as { text: string }).text,
-      "NUDGE1\n\nNUDGE2",
+      "NUDGE1\n\nNUDGE2\n\nhello",
     )
   },
 )
@@ -400,10 +396,10 @@ test(
       }
       await hooks["chat.message"]!({ sessionID: "s1" }, output)
 
-      assert.strictEqual(output.parts.length, 2)
+      assert.strictEqual(output.parts.length, 1)
       assert.strictEqual(
         (output.parts[0] as { text: string }).text,
-        "NUDGE",
+        "NUDGE\n\nhello",
       )
     } finally {
       process.env.HOME = originalHome
