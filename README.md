@@ -78,7 +78,9 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
   "position.compaction": "start",
   "enabled.normalMessage": true,
   "enabled.subagent": true,
-  "enabled.compaction": true
+  "enabled.compaction": true,
+  "wrapper.prefix": "<opencode-supernudge>",
+  "wrapper.suffix": "</opencode-supernudge>"
 }
 ```
 
@@ -133,6 +135,9 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `enabled.normalMessage` | `boolean` | `true` | Inject nudge on user messages. |
 | `enabled.subagent` | `boolean` | `true` | Inject nudge into system prompt. |
 | `enabled.compaction` | `boolean` | `true` | Inject nudge into context on compaction. |
+| `wrapper.prefix` | `string` | `"<opencode-supernudge>"` | Marker inserted above each nudge block. Empty string disables. |
+| `wrapper.suffix` | `string` | `"</opencode-supernudge>"` | Marker inserted below each nudge block. Empty string disables. |
+| `nudge.separator` | `string` | `"\n\n"` | Separator between multiple nudges within the same block. |
 
 All parameters except `prompts` can be overridden per-prompt by including them in the prompt object.
 

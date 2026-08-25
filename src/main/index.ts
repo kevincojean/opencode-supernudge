@@ -17,6 +17,9 @@ type PromptConfig = {
   "enabled.normalMessage": boolean
   "enabled.subagent": boolean
   "enabled.compaction": boolean
+  "wrapper.prefix": string
+  "wrapper.suffix": string
+  "nudge.separator": string
 }
 
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
@@ -38,6 +41,25 @@ const DEFAULTS: Config = {
   "enabled.normalMessage": true,
   "enabled.subagent": true,
   "enabled.compaction": true,
+  "wrapper.prefix": "<opencode-supernudge>",
+  "wrapper.suffix": "</opencode-supernudge>",
+  "nudge.separator": "\n\n",
+}
+
+function wrapString(content: string, prefix: string, suffix: string): string {
+  const parts: string[] = []
+  if (prefix) parts.push(prefix)
+  parts.push(content)
+  if (suffix) parts.push(suffix)
+  return parts.join("\n")
+}
+
+function wrapArray(items: string[], prefix: string, suffix: string): string[] {
+  const result: string[] = []
+  if (prefix) result.push(prefix)
+  result.push(...items)
+  if (suffix) result.push(suffix)
+  return result
 }
 
 function resolvePath(p: string): string {
@@ -77,10 +99,15 @@ function resolvePrompts(
   return result
 }
 
-function getNudge(configPath: string): ResolvedPrompt[] {
+function getNudge(configPath: string): { prompts: ResolvedPrompt[]; prefix: string; suffix: string; separator: string } {
   const config = loadConfig(configPath)
   const { prompts, ...defaults } = config
-  return resolvePrompts(prompts, defaults)
+  return {
+    prompts: resolvePrompts(prompts, defaults),
+    prefix: defaults["wrapper.prefix"],
+    suffix: defaults["wrapper.suffix"],
+    separator: defaults["nudge.separator"],
+  }
 }
 
 const DEFAULT_CONFIG_PATH = path.join(
@@ -98,7 +125,7 @@ const plugin: Plugin = async (_input, options) => {
 
   return {
     "chat.message": async (input, output) => {
-      const resolvedPrompts = getNudge(configPath)
+      const { prompts: resolvedPrompts, prefix, suffix, separator } = getNudge(configPath)
       if (resolvedPrompts.length === 0) return
 
       let promptCounts = counters.get(input.sessionID)
@@ -139,15 +166,19 @@ const plugin: Plugin = async (_input, options) => {
       const target = existing as { text: string }
 
       if (startTexts.length > 0) {
-        target.text = startTexts.join("\n\n") + "\n\n" + target.text
+        const block = startTexts.join(separator)
+        const wrapped = wrapString(block, prefix, suffix)
+        target.text = wrapped + "\n\n" + target.text
       }
       if (endTexts.length > 0) {
-        target.text = target.text + "\n\n" + endTexts.join("\n\n")
+        const block = endTexts.join(separator)
+        const wrapped = wrapString(block, prefix, suffix)
+        target.text = target.text + "\n\n" + wrapped
       }
     },
     "experimental.chat.system.transform": async (input, output) => {
       if (input.sessionID) return
-      const resolvedPrompts = getNudge(configPath)
+      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath)
       if (resolvedPrompts.length === 0) return
 
       const startPrompts: string[] = []
@@ -163,14 +194,16 @@ const plugin: Plugin = async (_input, options) => {
       }
 
       if (startPrompts.length > 0) {
-        output.system.unshift(...startPrompts)
+        const block = wrapArray(startPrompts, prefix, suffix)
+        output.system.unshift(...block)
       }
       if (endPrompts.length > 0) {
-        output.system.push(...endPrompts)
+        const block = wrapArray(endPrompts, prefix, suffix)
+        output.system.push(...block)
       }
     },
     "experimental.session.compacting": async (input, output) => {
-      const resolvedPrompts = getNudge(configPath)
+      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath)
 
       const promptCounts = counters.get(input.sessionID)
       if (promptCounts) {
@@ -194,10 +227,12 @@ const plugin: Plugin = async (_input, options) => {
       }
 
       if (startPrompts.length > 0) {
-        output.context.unshift(...startPrompts)
+        const block = wrapArray(startPrompts, prefix, suffix)
+        output.context.unshift(...block)
       }
       if (endPrompts.length > 0) {
-        output.context.push(...endPrompts)
+        const block = wrapArray(endPrompts, prefix, suffix)
+        output.context.push(...block)
       }
     },
   }
