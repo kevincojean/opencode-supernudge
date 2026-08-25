@@ -20,6 +20,7 @@ type SuperNudgeConfig = {
   "enabled.normalMessage"?: boolean
   "enabled.subagent"?: boolean
   "enabled.compaction"?: boolean
+  "nudge.skipBelowChars"?: number
 }
 
 const projectDir = process.cwd()
@@ -117,6 +118,7 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "enabled.normalMessage": config["enabled.normalMessage"] ?? true,
     "enabled.subagent": config["enabled.subagent"] ?? true,
     "enabled.compaction": config["enabled.compaction"] ?? true,
+    "nudge.skipBelowChars": config["nudge.skipBelowChars"] ?? 3,
   }
   fs.writeFileSync(
     path.join(supernudgeDir, "supernudge-configuration.jsonc"),
@@ -449,5 +451,14 @@ describe("e2e: SuperNudge acceptance criteria", () => {
       nudgesInUserMessages <= 1,
       `compaction disabled: nudge should only come from chat.message, not compaction. Found ${nudgesInUserMessages} in user messages. Got: ${userText}`,
     )
+  })
+
+  test("AC14: given nudge.skipBelowChars=50, when short message sent, then message does NOT contain nudge; when long message sent, then message contains nudge", async () => {
+    writeNudgeConfig({ "nudge.skipBelowChars": 50 })
+    const shortText = await sendMessage("hi")
+    assert.ok(!shortText.includes(NUDGE), `short msg must NOT have nudge. Got: ${shortText}`)
+
+    const longText = await sendMessage("hello world this is a long enough message to pass the threshold")
+    assert.ok(longText.includes(NUDGE), `long msg must have nudge. Got: ${longText}`)
   })
 })

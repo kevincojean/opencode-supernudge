@@ -139,6 +139,7 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `wrapper.suffix` | `string` | `"</opencode-supernudge>"` | Marker inserted below each nudge block. Empty string disables. |
 | `nudge.separator` | `string` | `"\n\n"` | Separator between multiple nudges within the same block. |
 | `nudge.enableTitlePrefix` | `boolean` | `true` | Prefix each nudge with `[filename]` (lowercase, no extension). |
+| `nudge.skipBelowChars` | `number` | `3` | Skip injection when user message length `<=` this threshold. |
 
 All parameters except `prompts` can be overridden per-prompt by including them in the prompt object.
 

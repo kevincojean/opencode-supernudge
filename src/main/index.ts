@@ -22,6 +22,7 @@ type PromptConfig = {
   "nudge.separator": string
   "nudge.enableTitlePrefix": boolean
   "nudge.trim": boolean
+  "nudge.skipBelowChars": number
 }
 
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
@@ -48,6 +49,7 @@ const DEFAULTS: Config = {
   "nudge.separator": "\n\n",
   "nudge.enableTitlePrefix": true,
   "nudge.trim": true,
+  "nudge.skipBelowChars": 3,
 }
 
 function withTitle(prompt: ResolvedPrompt): string {
@@ -151,6 +153,11 @@ const plugin: Plugin = async (_input, options) => {
       const startTexts: string[] = []
       const endTexts: string[] = []
 
+      const messageText = output.parts.find(p => p.type === "text" && "text" in p)
+        ? ((output.parts.find(p => p.type === "text" && "text" in p) as { text: string }).text)
+        : ""
+      const skipThreshold = (p: ResolvedPrompt) => p["nudge.skipBelowChars"]
+
       for (let i = 0; i < resolvedPrompts.length; i++) {
         const prompt = resolvedPrompts[i]
         if (!prompt["enabled.normalMessage"]) continue
@@ -162,6 +169,7 @@ const plugin: Plugin = async (_input, options) => {
             ? prompt["injection.alwaysOnFirstMessage"]
             : (count - 1) % interval === 0)
         if (!shouldInject) continue
+        if (messageText.length <= skipThreshold(prompt)) continue
 
         if (prompt["position.normalMessage"] === "end") {
           endTexts.push(withTitle(prompt))

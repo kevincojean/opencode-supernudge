@@ -1087,3 +1087,51 @@ test(
   },
 )
 
+test(
+  "given nudge.skipBelowChars=5 and prompt containing NUDGE, when user sends short message (<= 5 chars), then message does NOT contain NUDGE",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.skipBelowChars": 5,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hi")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok(
+      !(output.parts[0] as TextPart).text.includes("NUDGE"),
+      `short message must skip nudge. Got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
+test(
+  "given nudge.skipBelowChars=5 and prompt containing NUDGE, when user sends long message (> 5 chars), then message contains NUDGE",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.skipBelowChars": 5,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello world")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok(
+      (output.parts[0] as TextPart).text.includes("NUDGE"),
+      `long message must contain NUDGE. Got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
