@@ -1,5 +1,6 @@
-## New (1)
+## New (2)
 - [Add injection capacities after n turns when an agent or sub-agent has been working autonomously. Differs from user/assistant turns.](tasks/T-001.md)
+- [Scope behaviour to specific agents](tasks/T-002.md)
 ## Accepted (0)
 ## Breakdown (0)
 ## Ready (0)
