@@ -106,5 +106,8 @@ node --import tsx --test src/test/supernudge.test.ts
 SN_E2E_NO_BWRAP=1 node --import tsx --test src/test/e2e.test.ts
 ```
 
+## Roadmap
+You can see what I have in mind for next features by reading my humble [kanban board](.opencode/kanban/board.md).
+
 ## License
 MIT Kévin Cojean
