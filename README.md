@@ -1,11 +1,21 @@
 # OpenCode SuperNudge
 
-OpenCode v1 plugin that persistently injects nudge text into LLM conversations to prevent drift.
+A plugin for when you really want to make sure your agents never forget about one super important thing. 
 
 ## Install
 
 ```bash
+git clone https://github.com/kevincojean/opencode-supernudge.git ~/Documents/Development/com.kevincojean.opencode-supernudge
+cd ~/Documents/Development/com.kevincojean.opencode-supernudge
 npm install
+```
+
+Add to `~/.config/opencode/opencode.jsonc` `plugin` array:
+
+```jsonc
+"plugin": [
+  "/home/dehi/Documents/Development/com.kevincojean.opencode-supernudge"
+]
 ```
 
 
