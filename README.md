@@ -50,16 +50,16 @@ Do NOT use the question tool at you disposal, it is extremely slow.
 
 ## Install
 ```bash
-git clone https://github.com/kevincojean/opencode-supernudge.git ~/Documents/Development/com.kevincojean.opencode-supernudge
-cd ~/Documents/Development/com.kevincojean.opencode-supernudge
+git clone https://github.com/kevincojean/opencode-supernudge.git
+cd opencode-supernudge
 npm install
 ```
 
-Add to `~/.config/opencode/opencode.jsonc` `plugin` array:
+Add to `~/.config/opencode/opencode.jsonc` `plugin` array, replacing `<PATH_TO_SUPERNUDGE>` with the absolute path to your clone:
 
 ```jsonc
 "plugin": [
-  "/home/dehi/Documents/Development/com.kevincojean.opencode-supernudge"
+  "<PATH_TO_SUPERNUDGE>"
 ]
 ```
 
