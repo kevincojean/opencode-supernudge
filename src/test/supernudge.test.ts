@@ -139,7 +139,7 @@ test(
     assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
       (output.parts[0] as TextPart).text,
-      "user-text\n\n<opencode-supernudge>\nNUDGE\n</opencode-supernudge>",
+      "user-text\n\n<opencode-supernudge>\n[nudge] NUDGE\n</opencode-supernudge>",
     )
   },
 )
@@ -162,7 +162,7 @@ test(
     )
 
     assert.strictEqual(output.system[0], "<opencode-supernudge>")
-    assert.strictEqual(output.system[1], "NUDGE")
+    assert.strictEqual(output.system[1], "[nudge] NUDGE")
     assert.strictEqual(output.system[2], "</opencode-supernudge>")
     assert.strictEqual(output.system[3], "existing-system")
   },
@@ -207,7 +207,7 @@ test(
     )
 
     assert.strictEqual(output.context[0], "<opencode-supernudge>")
-    assert.strictEqual(output.context[1], "NUDGE")
+    assert.strictEqual(output.context[1], "[nudge] NUDGE")
     assert.strictEqual(output.context[2], "</opencode-supernudge>")
     assert.strictEqual(output.context[3], "existing-context")
   },
@@ -372,7 +372,7 @@ test(
     assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
       (output.parts[0] as TextPart).text,
-      "<opencode-supernudge>\nNUDGE1\n\nNUDGE2\n</opencode-supernudge>\n\nhello",
+      "<opencode-supernudge>\n[nudge1] NUDGE1\n\n[nudge2] NUDGE2\n</opencode-supernudge>\n\nhello",
     )
   },
 )
@@ -403,7 +403,7 @@ test(
       assert.strictEqual(output.parts.length, 1)
       assert.strictEqual(
         (output.parts[0] as TextPart).text,
-        "<opencode-supernudge>\nNUDGE\n</opencode-supernudge>\n\nhello",
+        "<opencode-supernudge>\n[nudge] NUDGE\n</opencode-supernudge>\n\nhello",
       )
     } finally {
       process.env.HOME = originalHome
@@ -605,8 +605,8 @@ test(
       { model: stubModel() },
       output,
     )
-    assert.ok(output.system.includes("NUDGE_A"), "NUDGE_A in system (default enabled)")
-    assert.ok(!output.system.includes("NUDGE_B"), "NUDGE_B NOT in system (enabled.subagent=false)")
+    assert.ok(output.system.some(s => s.includes("NUDGE_A")), "NUDGE_A in system (default enabled)")
+    assert.ok(!output.system.some(s => s.includes("NUDGE_B")), "NUDGE_B NOT in system (enabled.subagent=false)")
   },
 )
 
@@ -627,8 +627,8 @@ test(
       { sessionID: "s1" },
       output,
     )
-    assert.ok(output.context.includes("NUDGE_A"), "NUDGE_A in context (default enabled)")
-    assert.ok(!output.context.includes("NUDGE_B"), "NUDGE_B NOT in context (enabled.compaction=false)")
+    assert.ok(output.context.some(c => c.includes("NUDGE_A")), "NUDGE_A in context (default enabled)")
+    assert.ok(!output.context.some(c => c.includes("NUDGE_B")), "NUDGE_B NOT in context (enabled.compaction=false)")
   },
 )
 
@@ -675,7 +675,7 @@ test(
 
     const text = (output.parts[0] as TextPart).text
     assert.ok(
-      text.startsWith("<opencode-supernudge>\nNUDGE\n</opencode-supernudge>"),
+      text.startsWith("<opencode-supernudge>\n[nudge] NUDGE\n</opencode-supernudge>"),
       `nudge block must be wrapped with default markers. Got: ${text}`,
     )
     assert.ok(
@@ -705,7 +705,7 @@ test(
 
     const text = (output.parts[0] as TextPart).text
     assert.ok(
-      text.startsWith("[START]\nNUDGE\n[END]"),
+      text.startsWith("[START]\n[nudge] NUDGE\n[END]"),
       `nudge block must be wrapped with custom markers. Got: ${text}`,
     )
     assert.ok(!text.includes("<opencode-supernudge>"), "default markers must NOT appear when custom set")
@@ -769,7 +769,7 @@ test(
       `user text must come first. Got: ${text}`,
     )
     assert.ok(
-      text.endsWith("<opencode-supernudge>\nNUDGE\n</opencode-supernudge>"),
+      text.endsWith("<opencode-supernudge>\n[nudge] NUDGE\n</opencode-supernudge>"),
       `nudge at end must be wrapped. Got: ${text}`,
     )
   },
@@ -794,8 +794,8 @@ test(
     await hooks["chat.message"]!({ sessionID: "s1" }, output)
 
     const text = (output.parts[0] as TextPart).text
-    assert.ok(text.startsWith("<opencode-supernudge>\nNUDGE_A\n</opencode-supernudge>"), `start nudge wrapped. Got: ${text}`)
-    assert.ok(text.endsWith("<opencode-supernudge>\nNUDGE_B\n</opencode-supernudge>"), `end nudge wrapped. Got: ${text}`)
+    assert.ok(text.startsWith("<opencode-supernudge>\n[nudge_a] NUDGE_A\n</opencode-supernudge>"), `start nudge wrapped. Got: ${text}`)
+    assert.ok(text.endsWith("<opencode-supernudge>\n[nudge_b] NUDGE_B\n</opencode-supernudge>"), `end nudge wrapped. Got: ${text}`)
     assert.strictEqual(text.split("<opencode-supernudge>").length - 1, 2, "two prefix markers (start + end blocks)")
     assert.strictEqual(text.split("</opencode-supernudge>").length - 1, 2, "two suffix markers (start + end blocks)")
   },
@@ -816,7 +816,7 @@ test(
     )
 
     assert.strictEqual(output.system[0], "<opencode-supernudge>", "first element must be prefix marker")
-    assert.strictEqual(output.system[1], "NUDGE", "nudge content after prefix")
+    assert.strictEqual(output.system[1], "[nudge] NUDGE", "nudge content after prefix")
     assert.strictEqual(output.system[2], "</opencode-supernudge>", "suffix marker after nudge")
     assert.strictEqual(output.system[3], "existing-system", "existing system after wrapper")
   },
@@ -841,7 +841,7 @@ test(
 
     assert.strictEqual(output.system[0], "existing-system", "existing system first")
     assert.strictEqual(output.system[1], "<opencode-supernudge>", "prefix marker before end nudge")
-    assert.strictEqual(output.system[2], "NUDGE", "nudge content")
+    assert.strictEqual(output.system[2], "[nudge] NUDGE", "nudge content")
     assert.strictEqual(output.system[3], "</opencode-supernudge>", "suffix marker after nudge")
   },
 )
@@ -861,7 +861,7 @@ test(
     )
 
     assert.strictEqual(output.context[0], "<opencode-supernudge>", "first element must be prefix marker")
-    assert.strictEqual(output.context[1], "NUDGE", "nudge content after prefix")
+    assert.strictEqual(output.context[1], "[nudge] NUDGE", "nudge content after prefix")
     assert.strictEqual(output.context[2], "</opencode-supernudge>", "suffix marker after nudge")
     assert.strictEqual(output.context[3], "existing-context", "existing context after wrapper")
   },
@@ -886,7 +886,7 @@ test(
     await hooks["chat.message"]!({ sessionID: "s1" }, output)
 
     const text = (output.parts[0] as TextPart).text
-    assert.strictEqual(text, "NUDGE\n\nhello", `empty markers = no wrapper. Got: ${text}`)
+    assert.strictEqual(text, "[nudge] NUDGE\n\nhello", `empty markers = no wrapper. Got: ${text}`)
     assert.ok(!text.includes("<opencode-supernudge>"), "default markers must NOT appear")
   },
 )
@@ -913,8 +913,177 @@ test(
     const text = (output.parts[0] as TextPart).text
     assert.strictEqual(
       text,
-      "<opencode-supernudge>\nNUDGE1---NUDGE2\n</opencode-supernudge>\n\nhello",
+      "<opencode-supernudge>\n[nudge1] NUDGE1---[nudge2] NUDGE2\n</opencode-supernudge>\n\nhello",
       `nudges must be joined by custom separator. Got: ${text}`,
     )
   },
 )
+
+test(
+  "given default config with prompt file named tdd.md containing NUDGE_CONTENT, when chat.message fires, then nudge content prefixed with [tdd]",
+  async () => {
+    const dir = mkTmp()
+    const p = writePrompt(dir, "tdd.md", "NUDGE_CONTENT")
+    const configPath = writeConfigFile({ prompts: [p] })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.strictEqual(
+      text,
+      "<opencode-supernudge>\n[tdd] NUDGE_CONTENT\n</opencode-supernudge>\n\nhello",
+      `nudge must be prefixed with [tdd] (filename without ext, lowercased). Got: ${text}`,
+    )
+  },
+)
+
+test(
+  "given config with nudge.enableTitlePrefix=false and prompt file named tdd.md containing NUDGE, when chat.message fires, then nudge content has NO title prefix",
+  async () => {
+    const dir = mkTmp()
+    const p = writePrompt(dir, "tdd.md", "NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [p],
+      "nudge.enableTitlePrefix": false,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.ok(!text.includes("[tdd]"), `title prefix must NOT appear when nudge.enableTitlePrefix=false. Got: ${text}`)
+    assert.strictEqual(
+      text,
+      "<opencode-supernudge>\nNUDGE\n</opencode-supernudge>\n\nhello",
+      `nudge content without title prefix. Got: ${text}`,
+    )
+  },
+)
+
+test(
+  "given default config and prompt file with leading/trailing newlines and spaces around NUDGE, when chat.message fires, then nudge content trimmed of leading/trailing whitespace",
+  async () => {
+    const promptPath = createTempPrompts("\n\n  NUDGE  \n\n")
+    const configPath = writeConfigFile({ prompts: [promptPath] })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.strictEqual(
+      text,
+      "<opencode-supernudge>\n[nudge] NUDGE\n</opencode-supernudge>\n\nhello",
+      `nudge content must be trimmed (default nudge.trim=true). Got: ${text}`,
+    )
+  },
+)
+
+test(
+  "given config with nudge.trim=false and prompt file with leading/trailing newlines around NUDGE, when chat.message fires, then nudge content NOT trimmed",
+  async () => {
+    const promptPath = createTempPrompts("\n\nNUDGE\n\n")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.trim": false,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.strictEqual(
+      text,
+      "<opencode-supernudge>\n[nudge] \n\nNUDGE\n\n\n</opencode-supernudge>\n\nhello",
+      `nudge content must NOT be trimmed (nudge.trim=false). Got: ${text}`,
+    )
+  },
+)
+
+test(
+  "given config with per-prompt nudge.trim=false and global nudge.trim=true, when chat.message fires, then that prompt NOT trimmed but others trimmed",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "\n\nNUDGE_A\n\n")
+    const pB = writePrompt(dir, "nudge_b.txt", "\n\nNUDGE_B\n\n")
+    const configPath = writeConfigFile({
+      prompts: [pA, { path: pB, "nudge.trim": false }],
+      "nudge.trim": true,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.ok(
+      text.includes("[nudge_a] NUDGE_A"),
+      `NUDGE_A must be trimmed. Got: ${text}`,
+    )
+    assert.ok(
+      text.includes("[nudge_b] \n\nNUDGE_B\n\n"),
+      `NUDGE_B must NOT be trimmed (per-prompt nudge.trim=false). Got: ${text}`,
+    )
+  },
+)
+
+test(
+  "given default config and prompt file with leading/trailing newlines, when system.transform fires, then nudge content trimmed",
+  async () => {
+    const promptPath = createTempPrompts("\n\n  NUDGE  \n\n")
+    const configPath = writeConfigFile({ prompts: [promptPath] })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = { system: ["existing-system"] }
+    await hooks["experimental.chat.system.transform"]!(
+      { model: stubModel() },
+      output,
+    )
+
+    assert.strictEqual(output.system[1], "[nudge] NUDGE", `system nudge must be trimmed. Got: ${output.system[1]}`)
+  },
+)
+
+test(
+  "given default config and prompt file with leading/trailing newlines, when session.compacting fires, then nudge content trimmed",
+  async () => {
+    const promptPath = createTempPrompts("\n\n  NUDGE  \n\n")
+    const configPath = writeConfigFile({ prompts: [promptPath] })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = { context: ["existing-context"] }
+    await hooks["experimental.session.compacting"]!(
+      { sessionID: "s1" },
+      output,
+    )
+
+    assert.strictEqual(output.context[1], "[nudge] NUDGE", `compaction nudge must be trimmed. Got: ${output.context[1]}`)
+  },
+)
+

@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import http from "node:http"
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, execSync, type ChildProcess } from "node:child_process"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 
 const NUDGE = "E2E_NUDGE_MARKER"
@@ -30,6 +30,35 @@ let promptFile: string
 let proc: ChildProcess
 let client: OpencodeClient
 let stubServer: http.Server
+
+function killServer() {
+  if (!proc) return
+  const pid = proc.pid
+  if (!pid) return
+
+  try { process.kill(pid, "SIGTERM") } catch {}
+  try { process.kill(-pid, "SIGTERM") } catch {}
+
+  setTimeout(() => {
+    try { process.kill(pid, "SIGKILL") } catch {}
+    try { process.kill(-pid, "SIGKILL") } catch {}
+  }, 500)
+}
+
+function killOrphanedOpencode() {
+  try { execSync('pkill -9 -f "opencode serve"', { stdio: "ignore" }) } catch {}
+  try { execSync('pkill -9 -f "opencode.*serve"', { stdio: "ignore" }) } catch {}
+  try { execSync('fuser -k 30000/tcp 30001/tcp 30002/tcp 30003/tcp 30004/tcp 30005/tcp', { stdio: "ignore" }) } catch {}
+}
+
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(sig, () => {
+    killServer()
+    killOrphanedOpencode()
+    process.exit(130)
+  })
+}
+process.on("exit", killServer)
 
 function startStubServer(port: number): Promise<http.Server> {
   return new Promise((resolve, reject) => {
@@ -100,18 +129,37 @@ function deleteNudgeConfig() {
   if (fs.existsSync(p)) fs.unlinkSync(p)
 }
 
-function spawnBwrap(homeDir: string, port: number, stubPort: number): Promise<{ url: string; proc: ChildProcess }> {
+function spawnServer(homeDir: string, port: number): Promise<{ url: string; proc: ChildProcess }> {
+  const useBwrap = process.env.SN_E2E_NO_BWRAP !== "1"
+
   return new Promise((resolve, reject) => {
-    const p = spawn("bwrap", [
-      "--dev-bind", "/", "/",
-      "--setenv", "HOME", homeDir,
-      "--chdir", projectDir,
-      "opencode", "serve", `--port=${port}`, "--hostname=127.0.0.1",
-    ], { stdio: ["ignore", "pipe", "pipe"], detached: true })
+    let cmd: string
+    let args: string[]
+    let env: Record<string, string> | undefined
+    let detached: boolean
+
+    if (useBwrap) {
+      cmd = "bwrap"
+      args = ["--dev-bind", "/", "/", "--setenv", "HOME", homeDir, "--chdir", projectDir, "opencode", "serve", `--port=${port}`, "--hostname=127.0.0.1"]
+      detached = true
+    } else {
+      cmd = "opencode"
+      args = ["serve", `--port=${port}`, "--hostname=127.0.0.1"]
+      env = { ...process.env, HOME: homeDir }
+      detached = false
+    }
+
+    const p = spawn(cmd, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached,
+      env,
+      cwd: projectDir,
+    })
 
     let output = ""
     const timeout = setTimeout(() => {
-      p.kill()
+      try { p.kill("SIGKILL") } catch {}
+      if (p.pid) { try { process.kill(-p.pid, "SIGKILL") } catch {} }
       reject(new Error(`Server timeout. Output: ${output}`))
     }, 15000)
 
@@ -226,6 +274,7 @@ async function sendThenCompactThenSend(msg1: string, msg2: string): Promise<{ fi
 
 describe("e2e: SuperNudge acceptance criteria", () => {
   before(async () => {
+    killOrphanedOpencode()
     const stubPort = 31000
     stubServer = await startStubServer(stubPort)
 
@@ -257,16 +306,16 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     )
 
     writeNudgeConfig({})
-    const { url, proc: p } = await spawnBwrap(tmpHome, portCounter++, stubPort)
+    const { url, proc: p } = await spawnServer(tmpHome, portCounter++)
     proc = p
     client = createOpencodeClient({ baseUrl: url })
   })
 
   after(() => {
-    if (proc && proc.pid) {
-      try { process.kill(-proc.pid, "SIGKILL") } catch {}
-    }
+    killServer()
+    killOrphanedOpencode()
     stubServer.close()
+    setTimeout(() => process.exit(0), 1000)
   })
 
   test("AC1: given interval=2 and alwaysOnFirst=true, when 3 messages sent, then 1st has nudge, 2nd no nudge, 3rd has nudge", async () => {

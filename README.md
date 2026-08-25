@@ -138,6 +138,7 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `wrapper.prefix` | `string` | `"<opencode-supernudge>"` | Marker inserted above each nudge block. Empty string disables. |
 | `wrapper.suffix` | `string` | `"</opencode-supernudge>"` | Marker inserted below each nudge block. Empty string disables. |
 | `nudge.separator` | `string` | `"\n\n"` | Separator between multiple nudges within the same block. |
+| `nudge.enableTitlePrefix` | `boolean` | `true` | Prefix each nudge with `[filename]` (lowercase, no extension). |
 
 All parameters except `prompts` can be overridden per-prompt by including them in the prompt object.
 
@@ -147,8 +148,9 @@ All parameters except `prompts` can be overridden per-prompt by including them i
 node --import tsx --test src/test/supernudge.test.ts
 
 # E2E tests (spins up opencode serve with an internal stub LLM server)
-# Set SN_E2E_NO_BWRAP=1 if bwrap user namespaces are unavailable
-SN_E2E_NO_BWRAP=1 node --import tsx --test src/test/e2e.test.ts
+# SN_E2E_NO_BWRAP=1 is set by default in package.json to avoid bwrap process kill issues
+# Remove it from package.json to use bwrap sandboxing instead
+npm run test:e2e
 ```
 
 ## Roadmap

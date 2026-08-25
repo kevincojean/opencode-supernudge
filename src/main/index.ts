@@ -20,6 +20,8 @@ type PromptConfig = {
   "wrapper.prefix": string
   "wrapper.suffix": string
   "nudge.separator": string
+  "nudge.enableTitlePrefix": boolean
+  "nudge.trim": boolean
 }
 
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
@@ -28,7 +30,7 @@ type Config = PromptConfig & {
   "prompts": PromptEntry[]
 }
 
-type ResolvedPrompt = PromptConfig & { content: string }
+type ResolvedPrompt = PromptConfig & { content: string; title: string }
 
 const DEFAULTS: Config = {
   "prompts": [],
@@ -44,6 +46,13 @@ const DEFAULTS: Config = {
   "wrapper.prefix": "<opencode-supernudge>",
   "wrapper.suffix": "</opencode-supernudge>",
   "nudge.separator": "\n\n",
+  "nudge.enableTitlePrefix": true,
+  "nudge.trim": true,
+}
+
+function withTitle(prompt: ResolvedPrompt): string {
+  if (!prompt["nudge.enableTitlePrefix"]) return prompt.content
+  return `[${prompt.title}] ${prompt.content}`
 }
 
 function wrapString(content: string, prefix: string, suffix: string): string {
@@ -91,9 +100,11 @@ function resolvePrompts(
     const resolved: PromptConfig = { ...defaults, ...obj } as PromptConfig
     const filePath = resolvePath(obj.path)
     if (!fs.existsSync(filePath)) continue
-    const content = fs.readFileSync(filePath, "utf-8")
-    if (content.trim()) {
-      result.push({ ...resolved, content })
+    const rawContent = fs.readFileSync(filePath, "utf-8")
+    const content = resolved["nudge.trim"] ? rawContent.trim() : rawContent
+    if (content) {
+      const title = path.basename(filePath, path.extname(filePath)).toLowerCase()
+      result.push({ ...resolved, content, title })
     }
   }
   return result
@@ -153,9 +164,9 @@ const plugin: Plugin = async (_input, options) => {
         if (!shouldInject) continue
 
         if (prompt["position.normalMessage"] === "end") {
-          endTexts.push(prompt.content)
+          endTexts.push(withTitle(prompt))
         } else {
-          startTexts.push(prompt.content)
+          startTexts.push(withTitle(prompt))
         }
       }
 
@@ -187,9 +198,9 @@ const plugin: Plugin = async (_input, options) => {
       for (const prompt of resolvedPrompts) {
         if (!prompt["enabled.subagent"]) continue
         if (prompt["position.subagent"] === "end") {
-          endPrompts.push(prompt.content)
+          endPrompts.push(withTitle(prompt))
         } else {
-          startPrompts.push(prompt.content)
+          startPrompts.push(withTitle(prompt))
         }
       }
 
@@ -220,9 +231,9 @@ const plugin: Plugin = async (_input, options) => {
       for (const prompt of resolvedPrompts) {
         if (!prompt["enabled.compaction"]) continue
         if (prompt["position.compaction"] === "end") {
-          endPrompts.push(prompt.content)
+          endPrompts.push(withTitle(prompt))
         } else {
-          startPrompts.push(prompt.content)
+          startPrompts.push(withTitle(prompt))
         }
       }
 

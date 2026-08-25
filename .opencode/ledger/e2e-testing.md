@@ -10,3 +10,9 @@ e2e tests were hanging/timing out because they relied on a real LLM proxy at `lo
 
 ### alwaysOnFirstMessage was a no-op (pre-existing bug)
 The shouldInject logic used OR: `(count === 1 && alwaysOnFirst) || interval <= 1 || (count - 1) % interval === 0`. The modulo condition `(count-1) % interval === 0` is always true for count=1 (0 % anything = 0), making `alwaysOnFirstMessage=false` ineffective. Fixed by restructuring: `interval <= 1 || (count === 1 ? alwaysOnFirst : (count - 1) % interval === 0)`.
+
+### bwrap detached process unkillable - switched to direct spawn
+E2E tests spawned `opencode serve` inside `bwrap` with `detached: true`. The `process.kill(-pid, "SIGKILL")` (process group kill) could not reach the opencode process inside the bwrap PID namespace. Tests would hang indefinitely because the server never died. Fix: `SN_E2E_NO_BWRAP=1` env var (now default in package.json) spawns `opencode serve` directly (no bwrap) with `detached: false`, `HOME` env var set to temp dir. Direct child process is killable with `proc.kill("SIGKILL")`. Added `process.exit(0)` in `after` hook with 1s delay to force exit even if child processes (LSP servers) keep pipes open. Added `--test-timeout=60000` to prevent infinite hangs.
+
+### AC1 timeout at 30s - increased to 60s
+AC1 sends 3 sequential prompts in one session via `sendMessages`. Each `client.session.prompt` is a full round-trip through opencode serve + stub LLM. 30s timeout was too tight for 3 round trips. Increased `--test-timeout` to 60000ms.
