@@ -1,6 +1,7 @@
-## New (2)
+## New (3)
 - [Add injection capacities after n turns when an agent or sub-agent has been working autonomously. Differs from user/assistant turns.](tasks/T-001.md)
 - [Scope behaviour to specific agents](tasks/T-002.md)
+- [Scope nudge frequency per nudge prompt](tasks/T-003.md)
 ## Accepted (0)
 ## Breakdown (0)
 ## Ready (0)

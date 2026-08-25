@@ -1,9 +1,41 @@
 # OpenCode SuperNudge
+A plugin for when you really want to make sure your agents never forget about super important things.
 
-A plugin for when you really want to make sure your agents never forget about one super important thing. 
+## Use cases
+Here are examples of `nudges` I use in my workflows which improve agent code-quality ; because I remind them of this ALL the time.
+
+### Forcing TDD (red-green) development
+```md
+TDD: YOU MUST respect the RED / GREEN principle - you ALWAYS write a FAILING test case FIRST - this will ENSURE your changes actually fix the problem.
+```
+
+### Forcing e2e tests without mocking
+```md 
+Do NOT use MOCKING, EXCEPT when calling external vendors incurs a real life $$$ COST; otherwise we must stick with REAL e2e test cases at the outer-most user-facing SEAM.
+```
+
+### Forcing a test GivenWhenThen forms
+```md 
+You MUST define acceptance criteria in the GivenWhenThen form UNLESS the current project's style guidelines DICTATE otherwise.
+```
+
+### Hedging against too many useless test case creations
+```md 
+Be very wary of creating too many test cases. Test the inputs and the outputs of what the user will do at the seams of the application. No more, no less. We don't want to test cases that are extreme outliers.
+```
+
+### Hedging against docstring and comment pollution
+```md
+Do NOT add test docstrings, or comments, or module docstrings unless ABSOLUTELY necessary.
+```
+
+### Soft-disabling the often-slow 'question' tool
+```md
+Do NOT use the question tool at you disposal, it is extremely slow.
+```
+
 
 ## Install
-
 ```bash
 git clone https://github.com/kevincojean/opencode-supernudge.git ~/Documents/Development/com.kevincojean.opencode-supernudge
 cd ~/Documents/Development/com.kevincojean.opencode-supernudge
@@ -20,7 +52,6 @@ Add to `~/.config/opencode/opencode.jsonc` `plugin` array:
 
 
 ## Config
-
 Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 
 ```jsonc
@@ -39,7 +70,6 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 ```
 
 ### Parameters
-
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `prompts` | `string[]` | `[]` | File paths to inject (nudge), supports $HOME and ~ interpolation. |
@@ -54,7 +84,6 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 | `enabled.compaction` | `boolean` | `true` | Inject nudge into context on compaction. |
 
 ## Test
-
 ```bash
 # Unit tests
 node --import tsx --test src/test/supernudge.test.ts
@@ -65,5 +94,4 @@ SN_E2E_NO_BWRAP=1 node --import tsx --test src/test/e2e.test.ts
 ```
 
 ## License
-
 MIT Kévin Cojean
