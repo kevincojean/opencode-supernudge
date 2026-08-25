@@ -88,15 +88,26 @@ Any prompt entry can be an object that overrides specific global settings for th
 ```jsonc
 {
   "prompts": [
+    // String: global defaults apply
     "~/prompts/tdd.md",
+
+    // Object with partial overrides: only listed keys override globals
     {
       "path": "~/prompts/givenwhenthen.md",
       "injection.interval": 3
     },
+
+    // Object with all overrides: every global setting overridden
     {
       "path": "~/prompts/no-mocking.md",
       "injection.interval": 1,
+      "injection.alwaysOnFirstMessage": false,
+      "injection.resetCounterOnCompaction": false,
       "position.normalMessage": "end",
+      "position.subagent": "end",
+      "position.compaction": "end",
+      "enabled.normalMessage": true,
+      "enabled.subagent": false,
       "enabled.compaction": false
     }
   ],
@@ -105,10 +116,9 @@ Any prompt entry can be an object that overrides specific global settings for th
 }
 ```
 
-In the example above:
-- `tdd.md` uses all global defaults (interval=1, position=start, etc.)
-- `givenwhenthen.md` injects every 3rd message instead of every message
-- `no-mocking.md` injects every message, appended at the end instead of start, and skips compaction injection
+- `tdd.md` - string, all global defaults
+- `givenwhenthen.md` - partial override, injects every 3rd message only
+- `no-mocking.md` - full override, all globals ignored, uses its own settings exclusively
 
 ### Parameters
 | Key | Type | Default | Description |
@@ -131,7 +141,7 @@ All parameters except `prompts` can be overridden per-prompt by including them i
 # Unit tests
 node --import tsx --test src/test/supernudge.test.ts
 
-# E2E tests (requires opencode and an LLM proxy at localhost:8000)
+# E2E tests (spins up opencode serve with an internal stub LLM server)
 # Set SN_E2E_NO_BWRAP=1 if bwrap user namespaces are unavailable
 SN_E2E_NO_BWRAP=1 node --import tsx --test src/test/e2e.test.ts
 ```

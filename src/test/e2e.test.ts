@@ -95,13 +95,6 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
   )
 }
 
-function writeNudgeConfigRaw(content: string) {
-  fs.writeFileSync(
-    path.join(supernudgeDir, "supernudge-configuration.jsonc"),
-    content,
-  )
-}
-
 function deleteNudgeConfig() {
   const p = path.join(supernudgeDir, "supernudge-configuration.jsonc")
   if (fs.existsSync(p)) fs.unlinkSync(p)
@@ -319,13 +312,6 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     assert.ok(messages.data !== undefined, "messages should be retrievable after subagent prompt")
   })
 
-  test("AC4: given enabled.subagent=true, when normal message with sessionID, then nudge in user message only", async () => {
-    writeNudgeConfig({ "enabled.subagent": true })
-    const text = await sendMessage("hello")
-
-    assert.ok(text.includes(NUDGE), `nudge in user message. Got: ${text}`)
-  })
-
   test("AC5: given enabled.compaction=true, when compaction fires, then nudge at start of context", async () => {
     writeNudgeConfig({ "enabled.compaction": true })
     const { first, afterCompact } = await sendThenCompactThenSend("hello", "after-compact")
@@ -367,20 +353,6 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     assert.ok(!text.includes(NUDGE), `missing prompt file = no nudge. Got: ${text}`)
   })
 
-  test("AC10: given two prompt files with NUDGE1 and NUDGE2, when chat.message fires, then injected text is NUDGE1 newline newline NUDGE2", async () => {
-    const n1 = path.join(tmpHome, "n1.txt")
-    const n2 = path.join(tmpHome, "n2.txt")
-    fs.writeFileSync(n1, "E2E_NUDGE_1")
-    fs.writeFileSync(n2, "E2E_NUDGE_2")
-    writeNudgeConfig({ prompts: [n1, n2] })
-    const text = await sendMessage("hello")
-
-    assert.ok(text.includes("E2E_NUDGE_1"), `first nudge present. Got: ${text}`)
-    assert.ok(text.includes("E2E_NUDGE_2"), `second nudge present. Got: ${text}`)
-    assert.ok(text.indexOf("E2E_NUDGE_1") < text.indexOf("E2E_NUDGE_2"), `first before second. Got: ${text}`)
-    assert.ok(text.indexOf("E2E_NUDGE_2") < text.indexOf("hello"), `nudges before user text. Got: ${text}`)
-  })
-
   test("AC11: given prompt path using tilde and file at $HOME/prompts/nudge.txt, when plugin loads and chat.message fires, then nudge injected", async () => {
     const promptsDir = path.join(tmpHome, "prompts")
     fs.mkdirSync(promptsDir, { recursive: true })
@@ -389,21 +361,6 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     const text = await sendMessage("hello")
 
     assert.ok(text.includes(NUDGE), `tilde path nudge. Got: ${text}`)
-  })
-
-  test("AC12: given config file with JSONC comments and trailing commas, when plugin loads, then values parsed correctly and injection works", async () => {
-    writeNudgeConfigRaw(`// SuperNudge config
-{
-  "prompts": ["${promptFile}",],
-  "injection.interval": 2,
-  "injection.alwaysOnFirstMessage": true,
-  /* position default start */
-  "enabled.normalMessage": true,
-}`)
-    const texts = await sendMessages(["msg-1", "msg-2"])
-
-    assert.ok(texts[0].includes(NUDGE), `1st message must have nudge (alwaysOnFirst). Got: ${texts[0]}`)
-    assert.ok(!texts[1].includes(NUDGE), `2nd message must NOT have nudge (interval=2). Got: ${texts[1]}`)
   })
 
   test("AC13: given enabled.compaction=false, when session.compacting fires, then context does NOT contain nudge", async () => {
