@@ -4,7 +4,7 @@ import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
 import type { PluginInput } from "@opencode-ai/plugin"
-import type { Model, Project, UserMessage, Part } from "@opencode-ai/sdk"
+import type { Model, Project, UserMessage, Part, TextPart } from "@opencode-ai/sdk"
 
 function mkTmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "supernudge-"))
@@ -62,8 +62,8 @@ function emptyMessage(): UserMessage {
   }
 }
 
-function emptyTextPart(text: string): Part {
-  return { type: "text", text } as Part
+function emptyTextPart(text: string): TextPart {
+  return { type: "text", text } as TextPart
 }
 
 function stubModel(): Model {
@@ -93,8 +93,8 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, firstOut)
     assert.ok(
-      firstOut.parts[0]!.text.startsWith("NUDGE"),
-      `1st message must start with NUDGE, got: ${firstOut.parts[0]!.text}`,
+      (firstOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `1st message must start with NUDGE, got: ${(firstOut.parts[0] as TextPart).text}`,
     )
 
     const secondOut = {
@@ -103,7 +103,7 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, secondOut)
     assert.ok(
-      !secondOut.parts.some((p) => p.type === "text" && (p as { text: string }).text.includes("NUDGE")),
+      !secondOut.parts.some((p) => p.type === "text" && (p as TextPart).text.includes("NUDGE")),
       "2nd message must NOT contain NUDGE",
     )
 
@@ -113,8 +113,8 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, thirdOut)
     assert.ok(
-      thirdOut.parts[0]!.text.startsWith("NUDGE"),
-      `3rd message must start with NUDGE, got: ${thirdOut.parts[0]!.text}`,
+      (thirdOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `3rd message must start with NUDGE, got: ${(thirdOut.parts[0] as TextPart).text}`,
     )
   },
 )
@@ -138,7 +138,7 @@ test(
 
     assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
-      (output.parts[0] as { text: string }).text,
+      (output.parts[0] as TextPart).text,
       "user-text\n\nNUDGE",
     )
   },
@@ -228,7 +228,7 @@ test(
 
     assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
-      (output.parts[0] as { text: string }).text,
+      (output.parts[0] as TextPart).text,
       "hello",
     )
   },
@@ -253,8 +253,8 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, firstOut)
     assert.ok(
-      firstOut.parts[0]!.text.startsWith("NUDGE"),
-      `1st message must start with NUDGE, got: ${firstOut.parts[0]!.text}`,
+      (firstOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `1st message must start with NUDGE, got: ${(firstOut.parts[0] as TextPart).text}`,
     )
 
     await hooks["experimental.session.compacting"]!(
@@ -268,8 +268,8 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, nextOut)
     assert.ok(
-      nextOut.parts[0]!.text.startsWith("NUDGE"),
-      `next message after compaction reset must start with NUDGE, got: ${nextOut.parts[0]!.text}`,
+      (nextOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `next message after compaction reset must start with NUDGE, got: ${(nextOut.parts[0] as TextPart).text}`,
     )
   },
 )
@@ -306,8 +306,8 @@ test(
     }
     await hooksWithPrompt["chat.message"]!({ sessionID: "s1" }, firstOut)
     assert.ok(
-      firstOut.parts[0]!.text.startsWith("NUDGE"),
-      `1st message must start with NUDGE (default alwaysOnFirst=true), got: ${firstOut.parts[0]!.text}`,
+      (firstOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `1st message must start with NUDGE (default alwaysOnFirst=true), got: ${(firstOut.parts[0] as TextPart).text}`,
     )
 
     const secondOut = {
@@ -316,8 +316,8 @@ test(
     }
     await hooksWithPrompt["chat.message"]!({ sessionID: "s1" }, secondOut)
     assert.ok(
-      secondOut.parts[0]!.text.startsWith("NUDGE"),
-      `2nd message must start with NUDGE (default interval=1 means always inject), got: ${secondOut.parts[0]!.text}`,
+      (secondOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `2nd message must start with NUDGE (default interval=1 means always inject), got: ${(secondOut.parts[0] as TextPart).text}`,
     )
   },
 )
@@ -341,7 +341,7 @@ test(
 
     assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
-      (output.parts[0] as { text: string }).text,
+      (output.parts[0] as TextPart).text,
       "hello",
     )
   },
@@ -367,7 +367,7 @@ test(
 
     assert.strictEqual(output.parts.length, 1)
     assert.strictEqual(
-      (output.parts[0] as { text: string }).text,
+      (output.parts[0] as TextPart).text,
       "NUDGE1\n\nNUDGE2\n\nhello",
     )
   },
@@ -398,7 +398,7 @@ test(
 
       assert.strictEqual(output.parts.length, 1)
       assert.strictEqual(
-        (output.parts[0] as { text: string }).text,
+        (output.parts[0] as TextPart).text,
         "NUDGE\n\nhello",
       )
     } finally {
@@ -429,8 +429,8 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, firstOut)
     assert.ok(
-      firstOut.parts[0]!.text.startsWith("NUDGE"),
-      `1st message must start with NUDGE, got: ${firstOut.parts[0]!.text}`,
+      (firstOut.parts[0] as TextPart).text.startsWith("NUDGE"),
+      `1st message must start with NUDGE, got: ${(firstOut.parts[0] as TextPart).text}`,
     )
 
     const secondOut = {
@@ -439,7 +439,7 @@ test(
     }
     await hooks["chat.message"]!({ sessionID: "s1" }, secondOut)
     assert.ok(
-      !secondOut.parts.some((p) => p.type === "text" && (p as { text: string }).text.includes("NUDGE")),
+      !secondOut.parts.some((p) => p.type === "text" && (p as TextPart).text.includes("NUDGE")),
       "2nd message must NOT contain NUDGE (interval=2, alwaysOnFirst only)",
     )
   },

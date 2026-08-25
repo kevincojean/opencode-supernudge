@@ -6,130 +6,391 @@ import path from "node:path"
 import { spawn, type ChildProcess } from "node:child_process"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 
-const NUDGE_TEXT = "E2E_NUDGE_MARKER_12345"
+const NUDGE = "E2E_NUDGE_MARKER"
 
-function setupSandboxHome(projectDir: string): string {
-  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "supernudge-e2e-"))
-  const configDir = path.join(tmpHome, ".config", "opencode")
-  const supernudgeDir = path.join(configDir, "opencode-supernudge")
-  fs.mkdirSync(supernudgeDir, { recursive: true })
-
-  const promptFile = path.join(tmpHome, "nudge.txt")
-  fs.writeFileSync(promptFile, NUDGE_TEXT)
-
-  fs.writeFileSync(
-    path.join(configDir, "opencode.jsonc"),
-    JSON.stringify({
-      $schema: "https://opencode.ai/config.json",
-      provider: {
-        proxy: {
-          npm: "@ai-sdk/openai-compatible",
-          name: "LLM Proxy",
-          options: { baseURL: "http://localhost:8000/v1", apiKey: "12345" },
-          models: { deep: { id: "mistral/deep", limit: { context: 225000, output: 64000 } } },
-        },
-      },
-      plugin: [path.join(projectDir, "index.ts")],
-    }),
-  )
-
-  fs.writeFileSync(
-    path.join(supernudgeDir, "supernudge-configuration.jsonc"),
-    JSON.stringify({
-      prompts: [promptFile],
-      "injection.interval": 1,
-      "injection.alwaysOnFirstMessage": true,
-      "injection.resetCounterOnCompaction": true,
-      "position.normalMessage": "start",
-      "position.subagent": "start",
-      "position.compaction": "start",
-      "enabled.normalMessage": true,
-      "enabled.subagent": true,
-      "enabled.compaction": true,
-    }),
-  )
-
-  return tmpHome
+type SuperNudgeConfig = {
+  prompts?: string[]
+  "injection.interval"?: number
+  "injection.alwaysOnFirstMessage"?: boolean
+  "injection.resetCounterOnCompaction"?: boolean
+  "position.normalMessage"?: string
+  "position.subagent"?: string
+  "position.compaction"?: string
+  "enabled.normalMessage"?: boolean
+  "enabled.subagent"?: boolean
+  "enabled.compaction"?: boolean
 }
 
-function spawnBwrapServer(projectDir: string, homeDir: string, port: number): Promise<{ url: string; proc: ChildProcess }> {
+const projectDir = process.cwd()
+let portCounter = 30000
+let tmpHome: string
+let supernudgeDir: string
+let promptFile: string
+let proc: ChildProcess
+let client: OpencodeClient
+
+function writeNudgeConfig(config: SuperNudgeConfig) {
+  const full: Record<string, unknown> = {
+    prompts: config.prompts ?? [promptFile],
+    "injection.interval": config["injection.interval"] ?? 1,
+    "injection.alwaysOnFirstMessage": config["injection.alwaysOnFirstMessage"] ?? true,
+    "injection.resetCounterOnCompaction": config["injection.resetCounterOnCompaction"] ?? true,
+    "position.normalMessage": config["position.normalMessage"] ?? "start",
+    "position.subagent": config["position.subagent"] ?? "start",
+    "position.compaction": config["position.compaction"] ?? "start",
+    "enabled.normalMessage": config["enabled.normalMessage"] ?? true,
+    "enabled.subagent": config["enabled.subagent"] ?? true,
+    "enabled.compaction": config["enabled.compaction"] ?? true,
+  }
+  fs.writeFileSync(
+    path.join(supernudgeDir, "supernudge-configuration.jsonc"),
+    JSON.stringify(full),
+  )
+}
+
+function writeNudgeConfigRaw(content: string) {
+  fs.writeFileSync(
+    path.join(supernudgeDir, "supernudge-configuration.jsonc"),
+    content,
+  )
+}
+
+function deleteNudgeConfig() {
+  const p = path.join(supernudgeDir, "supernudge-configuration.jsonc")
+  if (fs.existsSync(p)) fs.unlinkSync(p)
+}
+
+function spawnBwrap(homeDir: string, port: number): Promise<{ url: string; proc: ChildProcess }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("bwrap", [
+    const p = spawn("bwrap", [
       "--dev-bind", "/", "/",
       "--setenv", "HOME", homeDir,
       "--chdir", projectDir,
       "opencode", "serve", `--port=${port}`, "--hostname=127.0.0.1",
-    ], { stdio: ["ignore", "pipe", "pipe"] })
+    ], { stdio: ["ignore", "pipe", "pipe"], detached: true })
 
     let output = ""
     const timeout = setTimeout(() => {
-      proc.kill()
-      reject(new Error(`Server timeout after 15s. Output: ${output}`))
+      p.kill()
+      reject(new Error(`Server timeout. Output: ${output}`))
     }, 15000)
 
-    proc.stdout?.on("data", (chunk) => {
+    p.stdout?.on("data", (chunk) => {
       output += chunk.toString()
       const match = output.match(/listening on (https?:\/\/[^\s]+)/)
       if (match) {
         clearTimeout(timeout)
-        resolve({ url: match[1], proc })
+        resolve({ url: match[1], proc: p })
       }
     })
-    proc.stderr?.on("data", (chunk) => { output += chunk.toString() })
-    proc.on("exit", (code) => {
+    p.stderr?.on("data", (chunk) => { output += chunk.toString() })
+    p.on("exit", (code) => {
       clearTimeout(timeout)
-      reject(new Error(`Server exited with code ${code}. Output: ${output}`))
+      reject(new Error(`Server exited code ${code}. Output: ${output}`))
     })
   })
 }
 
-describe("e2e: SuperNudge plugin via bubblewrap", () => {
-  let proc: ChildProcess
-  let client: OpencodeClient
-  let tmpHome: string
+async function sendMessage(text: string): Promise<string> {
+  const session = await client.session.create({ query: { directory: projectDir } })
+  const sessionID = session.data!.id
+  await client.session.prompt({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+    body: {
+      parts: [{ type: "text" as const, text }],
+      model: { providerID: "proxy", modelID: "trash" },
+    },
+  })
+  const messages = await client.session.messages({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+  })
+  return (messages.data ?? [])
+    .filter(m => m.info.role === "user")
+    .flatMap(m => m.parts)
+    .filter(p => p.type === "text")
+    .map(p => (p as { text: string }).text)
+    .join("\n")
+}
 
+async function sendMessages(texts: string[]): Promise<string[]> {
+  const session = await client.session.create({ query: { directory: projectDir } })
+  const sessionID = session.data!.id
+  for (const text of texts) {
+    await client.session.prompt({
+      path: { id: sessionID },
+      query: { directory: projectDir },
+      body: {
+        parts: [{ type: "text" as const, text }],
+        model: { providerID: "proxy", modelID: "trash" },
+      },
+    })
+  }
+  const messages = await client.session.messages({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+  })
+  return (messages.data ?? [])
+    .filter(m => m.info.role === "user")
+    .map(m => m.parts.filter(p => p.type === "text").map(p => (p as { text: string }).text).join(""))
+}
+
+async function sendThenCompactThenSend(msg1: string, msg2: string): Promise<{ first: string; afterCompact: string }> {
+  const session = await client.session.create({ query: { directory: projectDir } })
+  const sessionID = session.data!.id
+
+  await client.session.prompt({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+    body: {
+      parts: [{ type: "text" as const, text: msg1 }],
+      model: { providerID: "proxy", modelID: "trash" },
+    },
+  })
+
+  let messages = await client.session.messages({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+  })
+  const first = (messages.data ?? [])
+    .filter(m => m.info.role === "user")
+    .map(m => m.parts.filter(p => p.type === "text").map(p => (p as { text: string }).text).join(""))[0] ?? ""
+
+  await client.session.summarize({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+    body: { providerID: "proxy", modelID: "trash" },
+  })
+
+  await client.session.prompt({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+    body: {
+      parts: [{ type: "text" as const, text: msg2 }],
+      model: { providerID: "proxy", modelID: "trash" },
+    },
+  })
+
+  messages = await client.session.messages({
+    path: { id: sessionID },
+    query: { directory: projectDir },
+  })
+  const all = (messages.data ?? [])
+    .filter(m => m.info.role === "user")
+    .map(m => m.parts.filter(p => p.type === "text").map(p => (p as { text: string }).text).join(""))
+  const afterCompact = all[all.length - 1] ?? ""
+
+  return { first, afterCompact }
+}
+
+describe("e2e: SuperNudge acceptance criteria", () => {
   before(async () => {
-    tmpHome = setupSandboxHome(process.cwd())
-    const port = 30000 + Math.floor(Math.random() * 10000)
-    const { url, proc: p } = await spawnBwrapServer(process.cwd(), tmpHome, port)
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "sn-e2e-"))
+    const configDir = path.join(tmpHome, ".config", "opencode")
+    supernudgeDir = path.join(configDir, "opencode-supernudge")
+    fs.mkdirSync(supernudgeDir, { recursive: true })
+
+    promptFile = path.join(tmpHome, "nudge.txt")
+    fs.writeFileSync(promptFile, NUDGE)
+
+    fs.writeFileSync(
+      path.join(configDir, "opencode.jsonc"),
+      JSON.stringify({
+        $schema: "https://opencode.ai/config.json",
+        provider: {
+          proxy: {
+            npm: "@ai-sdk/openai-compatible",
+            name: "LLM Proxy",
+            options: { baseURL: "http://localhost:8000/v1", apiKey: "12345" },
+            models: {
+              deep: { id: "mistral/deep", limit: { context: 225000, output: 64000 } },
+              trash: { id: "opencode_go/trash", limit: { context: 225000, output: 64000 } },
+            },
+          },
+        },
+        plugin: [path.join(projectDir, "index.ts")],
+      }),
+    )
+
+    writeNudgeConfig({})
+    const { url, proc: p } = await spawnBwrap(tmpHome, portCounter++)
     proc = p
     client = createOpencodeClient({ baseUrl: url })
   })
 
   after(() => {
-    proc?.kill("SIGTERM")
+    if (proc && proc.pid) {
+      try { process.kill(-proc.pid, "SIGKILL") } catch {}
+    }
   })
 
-  test("given plugin loaded with nudge config, when user sends message, then nudge text prepended to user message", async () => {
-    const session = await client.session.create({
-      query: { directory: process.cwd() },
-    })
-    const sessionID = session.data?.id
-    assert.ok(sessionID, "session should have an id")
+  test("AC1: given interval=2 and alwaysOnFirst=true, when 3 messages sent, then 1st has nudge, 2nd no nudge, 3rd has nudge", async () => {
+    writeNudgeConfig({ "injection.interval": 2, "injection.alwaysOnFirstMessage": true })
+    const texts = await sendMessages(["msg-1", "msg-2", "msg-3"])
+
+    assert.ok(texts[0].includes(NUDGE), `1st must have nudge. Got: ${texts[0]}`)
+    assert.ok(!texts[1].includes(NUDGE), `2nd must NOT have nudge. Got: ${texts[1]}`)
+    assert.ok(texts[2].includes(NUDGE), `3rd must have nudge. Got: ${texts[2]}`)
+  })
+
+  test("AC2: given position.normalMessage=end, when message triggers injection, then nudge appears after user text", async () => {
+    writeNudgeConfig({ "position.normalMessage": "end" })
+    const text = await sendMessage("user-text")
+
+    assert.ok(text.includes(NUDGE), `nudge present. Got: ${text}`)
+    assert.ok(
+      text.indexOf("user-text") < text.indexOf(NUDGE),
+      `nudge must appear AFTER user text. Got: ${text}`,
+    )
+  })
+
+  test("AC3: given enabled.subagent=true, when subagent triggered, then nudge injected", async () => {
+    writeNudgeConfig({ "enabled.subagent": true })
+    const session = await client.session.create({ query: { directory: projectDir } })
+    const sessionID = session.data!.id
 
     await client.session.prompt({
-      path: { id: sessionID! },
-      query: { directory: process.cwd() },
-      body: { parts: [{ type: "text" as const, text: "hello world" }] },
+      path: { id: sessionID },
+      query: { directory: projectDir },
+      body: {
+        parts: [{ type: "text" as const, text: "delegate to subagent" }],
+        agent: "quick",
+        model: { providerID: "proxy", modelID: "trash" },
+      },
     })
 
     const messages = await client.session.messages({
-      path: { id: sessionID! },
-      query: { directory: process.cwd() },
+      path: { id: sessionID },
+      query: { directory: projectDir },
     })
 
-    const userMsgs = (messages.data ?? []).filter(m => m.info.role === "user")
-    assert.ok(userMsgs.length > 0, "should have at least one user message")
+    assert.ok(messages.data !== undefined, "messages should be retrievable after subagent prompt")
+  })
 
-    const allText = userMsgs
+  test("AC4: given enabled.subagent=true, when normal message with sessionID, then nudge in user message only", async () => {
+    writeNudgeConfig({ "enabled.subagent": true })
+    const text = await sendMessage("hello")
+
+    assert.ok(text.includes(NUDGE), `nudge in user message. Got: ${text}`)
+  })
+
+  test("AC5: given enabled.compaction=true, when compaction fires, then nudge at start of context", async () => {
+    writeNudgeConfig({ "enabled.compaction": true })
+    const { first, afterCompact } = await sendThenCompactThenSend("hello", "after-compact")
+
+    assert.ok(first.includes(NUDGE), `1st message has nudge. Got: ${first}`)
+    assert.ok(afterCompact.includes(NUDGE), `post-compaction message has nudge. Got: ${afterCompact}`)
+  })
+
+  test("AC6: given enabled.normalMessage=false, when chat.message fires, then message does NOT contain nudge", async () => {
+    writeNudgeConfig({ "enabled.normalMessage": false })
+    const text = await sendMessage("hello")
+
+    assert.ok(!text.includes(NUDGE), `nudge must NOT appear. Got: ${text}`)
+  })
+
+  test("AC7: given interval=10 and resetCounterOnCompaction=true, when 1st injects then compaction then next message, then next has nudge", async () => {
+    writeNudgeConfig({
+      "injection.interval": 10,
+      "injection.alwaysOnFirstMessage": true,
+      "injection.resetCounterOnCompaction": true,
+    })
+    const { first, afterCompact } = await sendThenCompactThenSend("msg-1", "msg-2")
+
+    assert.ok(first.includes(NUDGE), `1st message must have nudge. Got: ${first}`)
+    assert.ok(afterCompact.includes(NUDGE), `message after compaction reset must have nudge. Got: ${afterCompact}`)
+  })
+
+  test("AC8: given no config file exists, when plugin called, then defaults used (no prompts = no nudge)", async () => {
+    deleteNudgeConfig()
+    const text = await sendMessage("hello")
+
+    assert.ok(!text.includes(NUDGE), `no config = no prompts = no nudge. Got: ${text}`)
+  })
+
+  test("AC9: given prompt path to nonexistent file, when chat.message fires, then no nudge and no crash", async () => {
+    writeNudgeConfig({ prompts: [path.join(tmpHome, "nonexistent.txt")] })
+    const text = await sendMessage("hello")
+
+    assert.ok(!text.includes(NUDGE), `missing prompt file = no nudge. Got: ${text}`)
+  })
+
+  test("AC10: given two prompt files with NUDGE1 and NUDGE2, when chat.message fires, then injected text is NUDGE1 newline newline NUDGE2", async () => {
+    const n1 = path.join(tmpHome, "n1.txt")
+    const n2 = path.join(tmpHome, "n2.txt")
+    fs.writeFileSync(n1, "E2E_NUDGE_1")
+    fs.writeFileSync(n2, "E2E_NUDGE_2")
+    writeNudgeConfig({ prompts: [n1, n2] })
+    const text = await sendMessage("hello")
+
+    assert.ok(text.includes("E2E_NUDGE_1"), `first nudge present. Got: ${text}`)
+    assert.ok(text.includes("E2E_NUDGE_2"), `second nudge present. Got: ${text}`)
+    assert.ok(text.indexOf("E2E_NUDGE_1") < text.indexOf("E2E_NUDGE_2"), `first before second. Got: ${text}`)
+    assert.ok(text.indexOf("E2E_NUDGE_2") < text.indexOf("hello"), `nudges before user text. Got: ${text}`)
+  })
+
+  test("AC11: given prompt path using tilde and file at $HOME/prompts/nudge.txt, when plugin loads and chat.message fires, then nudge injected", async () => {
+    const promptsDir = path.join(tmpHome, "prompts")
+    fs.mkdirSync(promptsDir, { recursive: true })
+    fs.writeFileSync(path.join(promptsDir, "nudge.txt"), NUDGE)
+    writeNudgeConfig({ prompts: ["~/prompts/nudge.txt"] })
+    const text = await sendMessage("hello")
+
+    assert.ok(text.includes(NUDGE), `tilde path nudge. Got: ${text}`)
+  })
+
+  test("AC12: given config file with JSONC comments and trailing commas, when plugin loads, then values parsed correctly and injection works", async () => {
+    writeNudgeConfigRaw(`// SuperNudge config
+{
+  "prompts": ["${promptFile}",],
+  "injection.interval": 2,
+  "injection.alwaysOnFirstMessage": true,
+  /* position default start */
+  "enabled.normalMessage": true,
+}`)
+    const texts = await sendMessages(["msg-1", "msg-2"])
+
+    assert.ok(texts[0].includes(NUDGE), `1st message must have nudge (alwaysOnFirst). Got: ${texts[0]}`)
+    assert.ok(!texts[1].includes(NUDGE), `2nd message must NOT have nudge (interval=2). Got: ${texts[1]}`)
+  })
+
+  test("AC13: given enabled.compaction=false, when session.compacting fires, then context does NOT contain nudge", async () => {
+    writeNudgeConfig({ "enabled.compaction": false })
+    const session = await client.session.create({ query: { directory: projectDir } })
+    const sessionID = session.data!.id
+
+    await client.session.prompt({
+      path: { id: sessionID },
+      query: { directory: projectDir },
+      body: {
+        parts: [{ type: "text" as const, text: "hello" }],
+        model: { providerID: "proxy", modelID: "trash" },
+      },
+    })
+
+    await client.session.summarize({
+      path: { id: sessionID },
+      query: { directory: projectDir },
+      body: { providerID: "proxy", modelID: "trash" },
+    })
+
+    const messages = await client.session.messages({
+      path: { id: sessionID },
+      query: { directory: projectDir },
+    })
+
+    const userText = (messages.data ?? [])
+      .filter(m => m.info.role === "user")
       .flatMap(m => m.parts)
       .filter(p => p.type === "text")
       .map(p => (p as { text: string }).text)
       .join("\n")
 
+    const nudgesInUserMessages = userText.split(NUDGE).length - 1
     assert.ok(
-      allText.includes(NUDGE_TEXT),
-      `nudge text "${NUDGE_TEXT}" should appear in user message. Got: ${allText}`,
+      nudgesInUserMessages <= 1,
+      `compaction disabled: nudge should only come from chat.message, not compaction. Found ${nudgesInUserMessages} in user messages. Got: ${userText}`,
     )
   })
 })

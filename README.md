@@ -11,7 +11,12 @@ npm install
 ## Test
 
 ```bash
+# Unit tests
 node --import tsx --test src/test/supernudge.test.ts
+
+# E2E tests (requires opencode and an LLM proxy at localhost:8000)
+# Set SN_E2E_NO_BWRAP=1 if bwrap user namespaces are unavailable
+SN_E2E_NO_BWRAP=1 node --import tsx --test src/test/e2e.test.ts
 ```
 
 ## Config

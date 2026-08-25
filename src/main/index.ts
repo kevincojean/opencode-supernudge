@@ -70,18 +70,23 @@ const DEFAULT_CONFIG_PATH = path.join(
   ".config/opencode/opencode-supernudge/supernudge-configuration.jsonc",
 )
 
+function getNudge(configPath: string) {
+  const config = loadConfig(configPath)
+  const nudgeText = loadPrompts(config["prompts"])
+  return { config, nudgeText }
+}
+
 const plugin: Plugin = async (_input, options) => {
   const optConfigPath = options?.configPath
   const configPath = typeof optConfigPath === "string"
     ? optConfigPath
     : DEFAULT_CONFIG_PATH
 
-  const config = loadConfig(configPath)
-  const nudgeText = loadPrompts(config["prompts"])
   const counters = new Map<string, number>()
 
   return {
     "chat.message": async (input, output) => {
+      const { config, nudgeText } = getNudge(configPath)
       if (!config["enabled.normalMessage"]) return
       if (!nudgeText) return
       const count = (counters.get(input.sessionID) ?? 0) + 1
@@ -102,6 +107,7 @@ const plugin: Plugin = async (_input, options) => {
       }
     },
     "experimental.chat.system.transform": async (input, output) => {
+      const { config, nudgeText } = getNudge(configPath)
       if (!config["enabled.subagent"]) return
       if (input.sessionID) return
       if (!nudgeText) return
@@ -112,10 +118,12 @@ const plugin: Plugin = async (_input, options) => {
       }
     },
     "experimental.session.compacting": async (input, output) => {
+      const { config } = getNudge(configPath)
       if (!config["enabled.compaction"]) return
       if (config["injection.resetCounterOnCompaction"]) {
         counters.delete(input.sessionID)
       }
+      const nudgeText = loadPrompts(config["prompts"])
       if (!nudgeText) return
       if (config["position.compaction"] === "end") {
         output.context.push(nudgeText)
