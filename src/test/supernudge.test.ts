@@ -465,3 +465,192 @@ test(
     assert.deepStrictEqual(output.context, ["existing-context"])
   },
 )
+
+test(
+  "given config with two prompts having interval=1 and interval=2, when 3 messages sent, then prompt A injected on all 3, prompt B injected on 1st and 3rd only",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
+    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [
+        { path: pA, "injection.interval": 1 },
+        { path: pB, "injection.interval": 2 },
+      ],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const out1 = { message: emptyMessage(), parts: [emptyTextPart("msg-1")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out1)
+    assert.ok((out1.parts[0] as TextPart).text.includes("NUDGE_A"), "1st: NUDGE_A present")
+    assert.ok((out1.parts[0] as TextPart).text.includes("NUDGE_B"), "1st: NUDGE_B present")
+
+    const out2 = { message: emptyMessage(), parts: [emptyTextPart("msg-2")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out2)
+    assert.ok((out2.parts[0] as TextPart).text.includes("NUDGE_A"), "2nd: NUDGE_A present")
+    assert.ok(!(out2.parts[0] as TextPart).text.includes("NUDGE_B"), "2nd: NUDGE_B absent")
+
+    const out3 = { message: emptyMessage(), parts: [emptyTextPart("msg-3")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out3)
+    assert.ok((out3.parts[0] as TextPart).text.includes("NUDGE_A"), "3rd: NUDGE_A present")
+    assert.ok((out3.parts[0] as TextPart).text.includes("NUDGE_B"), "3rd: NUDGE_B present")
+  },
+)
+
+test(
+  "given config with mixed string and object prompts and global interval=3, when 3 messages sent, then string prompt injects on 1st and 3rd, object prompt with interval=1 injects on all 3",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
+    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [pA, { path: pB, "injection.interval": 1 }],
+      "injection.interval": 3,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const out1 = { message: emptyMessage(), parts: [emptyTextPart("msg-1")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out1)
+    assert.ok((out1.parts[0] as TextPart).text.includes("NUDGE_A"), "1st: NUDGE_A present")
+    assert.ok((out1.parts[0] as TextPart).text.includes("NUDGE_B"), "1st: NUDGE_B present")
+
+    const out2 = { message: emptyMessage(), parts: [emptyTextPart("msg-2")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out2)
+    assert.ok(!(out2.parts[0] as TextPart).text.includes("NUDGE_A"), "2nd: NUDGE_A absent (interval=3)")
+    assert.ok((out2.parts[0] as TextPart).text.includes("NUDGE_B"), "2nd: NUDGE_B present (interval=1)")
+
+    const out3 = { message: emptyMessage(), parts: [emptyTextPart("msg-3")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out3)
+    assert.ok(!(out3.parts[0] as TextPart).text.includes("NUDGE_A"), "3rd: NUDGE_A absent (interval=3, next at 4th)")
+    assert.ok((out3.parts[0] as TextPart).text.includes("NUDGE_B"), "3rd: NUDGE_B present (interval=1)")
+  },
+)
+
+test(
+  "given config with per-prompt alwaysOnFirstMessage=false and interval=5, when 1st message sent, then that prompt NOT injected",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE_A")
+    const configPath = writeConfigFile({
+      prompts: [{ path: promptPath, "injection.interval": 5, "injection.alwaysOnFirstMessage": false }],
+      "injection.alwaysOnFirstMessage": true,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const out = { message: emptyMessage(), parts: [emptyTextPart("hello")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out)
+    assert.ok(!(out.parts[0] as TextPart).text.includes("NUDGE_A"), "1st: NUDGE_A absent (alwaysOnFirst=false)")
+  },
+)
+
+test(
+  "given config with per-prompt enabled.normalMessage=false, when chat.message fires, then that prompt NOT injected but other prompts still inject",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
+    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [pA, { path: pB, "enabled.normalMessage": false }],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const out = { message: emptyMessage(), parts: [emptyTextPart("hello")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out)
+    assert.ok((out.parts[0] as TextPart).text.includes("NUDGE_A"), "NUDGE_A present (default enabled)")
+    assert.ok(!(out.parts[0] as TextPart).text.includes("NUDGE_B"), "NUDGE_B absent (enabled.normalMessage=false)")
+  },
+)
+
+test(
+  "given config with per-prompt position.normalMessage=end, when chat.message fires, then that prompt appended at end while others at start",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
+    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [pA, { path: pB, "position.normalMessage": "end" }],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const out = { message: emptyMessage(), parts: [emptyTextPart("hello")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out)
+    const text = (out.parts[0] as TextPart).text
+    assert.ok(text.indexOf("NUDGE_A") < text.indexOf("hello"), "NUDGE_A before user text (start)")
+    assert.ok(text.indexOf("hello") < text.indexOf("NUDGE_B"), "NUDGE_B after user text (end)")
+  },
+)
+
+test(
+  "given config with per-prompt enabled.subagent=false, when system.transform fires, then that prompt NOT in system array but others still injected",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
+    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [pA, { path: pB, "enabled.subagent": false }],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = { system: ["existing"] }
+    await hooks["experimental.chat.system.transform"]!(
+      { model: stubModel() },
+      output,
+    )
+    assert.ok(output.system.includes("NUDGE_A"), "NUDGE_A in system (default enabled)")
+    assert.ok(!output.system.includes("NUDGE_B"), "NUDGE_B NOT in system (enabled.subagent=false)")
+  },
+)
+
+test(
+  "given config with per-prompt enabled.compaction=false, when session.compacting fires, then that prompt NOT in context array but others still injected",
+  async () => {
+    const dir = mkTmp()
+    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
+    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [pA, { path: pB, "enabled.compaction": false }],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = { context: ["existing"] }
+    await hooks["experimental.session.compacting"]!(
+      { sessionID: "s1" },
+      output,
+    )
+    assert.ok(output.context.includes("NUDGE_A"), "NUDGE_A in context (default enabled)")
+    assert.ok(!output.context.includes("NUDGE_B"), "NUDGE_B NOT in context (enabled.compaction=false)")
+  },
+)
+
+test(
+  "given config with per-prompt resetCounterOnCompaction=false and interval=3, when 1st message injects then compaction fires then 2nd message sent, then that prompt does NOT inject on 2nd message",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE_A")
+    const configPath = writeConfigFile({
+      prompts: [{ path: promptPath, "injection.interval": 3, "injection.resetCounterOnCompaction": false }],
+      "injection.alwaysOnFirstMessage": true,
+      "injection.resetCounterOnCompaction": true,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const out1 = { message: emptyMessage(), parts: [emptyTextPart("msg-1")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out1)
+    assert.ok((out1.parts[0] as TextPart).text.includes("NUDGE_A"), "1st: NUDGE_A present (alwaysOnFirst)")
+
+    await hooks["experimental.session.compacting"]!(
+      { sessionID: "s1" },
+      { context: [] },
+    )
+
+    const out2 = { message: emptyMessage(), parts: [emptyTextPart("msg-2")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, out2)
+    assert.ok(!(out2.parts[0] as TextPart).text.includes("NUDGE_A"), "2nd: NUDGE_A absent (counter not reset, count=2, interval=3)")
+  },
+)

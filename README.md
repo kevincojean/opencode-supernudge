@@ -82,10 +82,38 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 }
 ```
 
+### Per-prompt override
+Any prompt entry can be an object that overrides specific global settings for that prompt only. String entries use all global defaults.
+
+```jsonc
+{
+  "prompts": [
+    "~/prompts/tdd.md",
+    {
+      "path": "~/prompts/givenwhenthen.md",
+      "injection.interval": 3
+    },
+    {
+      "path": "~/prompts/no-mocking.md",
+      "injection.interval": 1,
+      "position.normalMessage": "end",
+      "enabled.compaction": false
+    }
+  ],
+  "injection.interval": 1,
+  "injection.alwaysOnFirstMessage": true
+}
+```
+
+In the example above:
+- `tdd.md` uses all global defaults (interval=1, position=start, etc.)
+- `givenwhenthen.md` injects every 3rd message instead of every message
+- `no-mocking.md` injects every message, appended at the end instead of start, and skips compaction injection
+
 ### Parameters
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `prompts` | `string[]` | `[]` | File paths to inject (nudge), supports $HOME and ~ interpolation. |
+| `prompts` | `(string \| object)[]` | `[]` | Prompt file paths. String or `{ path: string, ...overrides }`. Supports $HOME and ~ interpolation. |
 | `injection.interval` | `number` | `1` | Inject every Nth *user* message. `1` = every message. `2` = 1st, skip 2nd, inject 3rd. |
 | `injection.alwaysOnFirstMessage` | `boolean` | `true` | Force inject on first user message regardless of interval. |
 | `injection.resetCounterOnCompaction` | `boolean` | `true` | Reset per-session counter to 0 when compaction fires. |
@@ -95,6 +123,8 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 | `enabled.normalMessage` | `boolean` | `true` | Inject nudge on user messages. |
 | `enabled.subagent` | `boolean` | `true` | Inject nudge into system prompt. |
 | `enabled.compaction` | `boolean` | `true` | Inject nudge into context on compaction. |
+
+All parameters except `prompts` can be overridden per-prompt by including them in the prompt object.
 
 ## Test
 ```bash

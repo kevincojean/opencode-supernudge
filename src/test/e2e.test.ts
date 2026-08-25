@@ -3,13 +3,14 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import http from "node:http"
 import { spawn, type ChildProcess } from "node:child_process"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 
 const NUDGE = "E2E_NUDGE_MARKER"
 
 type SuperNudgeConfig = {
-  prompts?: string[]
+  prompts?: (string | { path: string } & Record<string, unknown>)[]
   "injection.interval"?: number
   "injection.alwaysOnFirstMessage"?: boolean
   "injection.resetCounterOnCompaction"?: boolean
@@ -28,6 +29,52 @@ let supernudgeDir: string
 let promptFile: string
 let proc: ChildProcess
 let client: OpencodeClient
+let stubServer: http.Server
+
+function startStubServer(port: number): Promise<http.Server> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      if (req.method === "GET" && req.url === "/v1/models") {
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({
+          object: "list",
+          data: [
+            { id: "mistral/deep", object: "model", created: 0, owned_by: "stub" },
+            { id: "opencode_go/trash", object: "model", created: 0, owned_by: "stub" },
+          ],
+        }))
+        return
+      }
+
+      if (req.method === "POST" && req.url === "/v1/chat/completions") {
+        let body = ""
+        req.on("data", (chunk) => { body += chunk.toString() })
+        req.on("end", () => {
+          res.writeHead(200, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({
+            id: "stub-completion",
+            object: "chat.completion",
+            created: 0,
+            model: "stub",
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "stub response" },
+              finish_reason: "stop",
+            }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          }))
+        })
+        return
+      }
+
+      res.writeHead(404, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "not found" }))
+    })
+
+    server.on("error", reject)
+    server.listen(port, "127.0.0.1", () => resolve(server))
+  })
+}
 
 function writeNudgeConfig(config: SuperNudgeConfig) {
   const full: Record<string, unknown> = {
@@ -60,7 +107,7 @@ function deleteNudgeConfig() {
   if (fs.existsSync(p)) fs.unlinkSync(p)
 }
 
-function spawnBwrap(homeDir: string, port: number): Promise<{ url: string; proc: ChildProcess }> {
+function spawnBwrap(homeDir: string, port: number, stubPort: number): Promise<{ url: string; proc: ChildProcess }> {
   return new Promise((resolve, reject) => {
     const p = spawn("bwrap", [
       "--dev-bind", "/", "/",
@@ -186,6 +233,9 @@ async function sendThenCompactThenSend(msg1: string, msg2: string): Promise<{ fi
 
 describe("e2e: SuperNudge acceptance criteria", () => {
   before(async () => {
+    const stubPort = 31000
+    stubServer = await startStubServer(stubPort)
+
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "sn-e2e-"))
     const configDir = path.join(tmpHome, ".config", "opencode")
     supernudgeDir = path.join(configDir, "opencode-supernudge")
@@ -202,7 +252,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
           proxy: {
             npm: "@ai-sdk/openai-compatible",
             name: "LLM Proxy",
-            options: { baseURL: "http://localhost:8000/v1", apiKey: "12345" },
+            options: { baseURL: `http://127.0.0.1:${stubPort}/v1`, apiKey: "12345" },
             models: {
               deep: { id: "mistral/deep", limit: { context: 225000, output: 64000 } },
               trash: { id: "opencode_go/trash", limit: { context: 225000, output: 64000 } },
@@ -214,7 +264,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     )
 
     writeNudgeConfig({})
-    const { url, proc: p } = await spawnBwrap(tmpHome, portCounter++)
+    const { url, proc: p } = await spawnBwrap(tmpHome, portCounter++, stubPort)
     proc = p
     client = createOpencodeClient({ baseUrl: url })
   })
@@ -223,6 +273,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     if (proc && proc.pid) {
       try { process.kill(-proc.pid, "SIGKILL") } catch {}
     }
+    stubServer.close()
   })
 
   test("AC1: given interval=2 and alwaysOnFirst=true, when 3 messages sent, then 1st has nudge, 2nd no nudge, 3rd has nudge", async () => {

@@ -7,8 +7,7 @@ import path from "node:path"
 
 type Position = "start" | "end"
 
-type Config = {
-  "prompts": string[]
+type PromptConfig = {
   "injection.interval": number
   "injection.alwaysOnFirstMessage": boolean
   "injection.resetCounterOnCompaction": boolean
@@ -19,6 +18,14 @@ type Config = {
   "enabled.subagent": boolean
   "enabled.compaction": boolean
 }
+
+type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
+
+type Config = PromptConfig & {
+  "prompts": PromptEntry[]
+}
+
+type ResolvedPrompt = PromptConfig & { content: string }
 
 const DEFAULTS: Config = {
   "prompts": [],
@@ -52,17 +59,28 @@ function loadConfig(configPath: string): Config {
   return { ...DEFAULTS, ...(parsed as Record<string, unknown>) } as Config
 }
 
-function loadPrompts(prompts: readonly string[]): string {
-  const loaded: string[] = []
-  for (const p of prompts) {
-    const resolved = resolvePath(p)
-    if (!fs.existsSync(resolved)) continue
-    const content = fs.readFileSync(resolved, "utf-8")
+function resolvePrompts(
+  prompts: readonly PromptEntry[],
+  defaults: PromptConfig,
+): ResolvedPrompt[] {
+  const result: ResolvedPrompt[] = []
+  for (const entry of prompts) {
+    const obj = typeof entry === "string" ? { path: entry } : entry
+    const resolved: PromptConfig = { ...defaults, ...obj } as PromptConfig
+    const filePath = resolvePath(obj.path)
+    if (!fs.existsSync(filePath)) continue
+    const content = fs.readFileSync(filePath, "utf-8")
     if (content.trim()) {
-      loaded.push(content)
+      result.push({ ...resolved, content })
     }
   }
-  return loaded.join("\n\n")
+  return result
+}
+
+function getNudge(configPath: string): ResolvedPrompt[] {
+  const config = loadConfig(configPath)
+  const { prompts, ...defaults } = config
+  return resolvePrompts(prompts, defaults)
 }
 
 const DEFAULT_CONFIG_PATH = path.join(
@@ -70,65 +88,116 @@ const DEFAULT_CONFIG_PATH = path.join(
   ".config/opencode/opencode-supernudge/supernudge-configuration.jsonc",
 )
 
-function getNudge(configPath: string) {
-  const config = loadConfig(configPath)
-  const nudgeText = loadPrompts(config["prompts"])
-  return { config, nudgeText }
-}
-
 const plugin: Plugin = async (_input, options) => {
   const optConfigPath = options?.configPath
   const configPath = typeof optConfigPath === "string"
     ? optConfigPath
     : DEFAULT_CONFIG_PATH
 
-  const counters = new Map<string, number>()
+  const counters = new Map<string, number[]>()
 
   return {
     "chat.message": async (input, output) => {
-      const { config, nudgeText } = getNudge(configPath)
-      if (!config["enabled.normalMessage"]) return
-      if (!nudgeText) return
-      const count = (counters.get(input.sessionID) ?? 0) + 1
-      counters.set(input.sessionID, count)
-      const interval = config["injection.interval"]
-      const shouldInject =
-        (count === 1 && config["injection.alwaysOnFirstMessage"]) ||
-        interval <= 1 ||
-        (count - 1) % interval === 0
-      if (!shouldInject) return
+      const resolvedPrompts = getNudge(configPath)
+      if (resolvedPrompts.length === 0) return
+
+      let promptCounts = counters.get(input.sessionID)
+      if (!promptCounts || promptCounts.length !== resolvedPrompts.length) {
+        promptCounts = new Array(resolvedPrompts.length).fill(0)
+      }
+      for (let i = 0; i < promptCounts.length; i++) {
+        promptCounts[i]++
+      }
+      counters.set(input.sessionID, promptCounts)
+
+      const startTexts: string[] = []
+      const endTexts: string[] = []
+
+      for (let i = 0; i < resolvedPrompts.length; i++) {
+        const prompt = resolvedPrompts[i]
+        if (!prompt["enabled.normalMessage"]) continue
+        const count = promptCounts[i]
+        const interval = prompt["injection.interval"]
+        const shouldInject =
+          interval <= 1 ||
+          (count === 1
+            ? prompt["injection.alwaysOnFirstMessage"]
+            : (count - 1) % interval === 0)
+        if (!shouldInject) continue
+
+        if (prompt["position.normalMessage"] === "end") {
+          endTexts.push(prompt.content)
+        } else {
+          startTexts.push(prompt.content)
+        }
+      }
+
+      if (startTexts.length === 0 && endTexts.length === 0) return
+
       const existing = output.parts.find(p => p.type === "text" && "text" in p)
       if (!existing) return
       const target = existing as { text: string }
-      if (config["position.normalMessage"] === "end") {
-        target.text = target.text + "\n\n" + nudgeText
-      } else {
-        target.text = nudgeText + "\n\n" + target.text
+
+      if (startTexts.length > 0) {
+        target.text = startTexts.join("\n\n") + "\n\n" + target.text
+      }
+      if (endTexts.length > 0) {
+        target.text = target.text + "\n\n" + endTexts.join("\n\n")
       }
     },
     "experimental.chat.system.transform": async (input, output) => {
-      const { config, nudgeText } = getNudge(configPath)
-      if (!config["enabled.subagent"]) return
       if (input.sessionID) return
-      if (!nudgeText) return
-      if (config["position.subagent"] === "end") {
-        output.system.push(nudgeText)
-      } else {
-        output.system.unshift(nudgeText)
+      const resolvedPrompts = getNudge(configPath)
+      if (resolvedPrompts.length === 0) return
+
+      const startPrompts: string[] = []
+      const endPrompts: string[] = []
+
+      for (const prompt of resolvedPrompts) {
+        if (!prompt["enabled.subagent"]) continue
+        if (prompt["position.subagent"] === "end") {
+          endPrompts.push(prompt.content)
+        } else {
+          startPrompts.push(prompt.content)
+        }
+      }
+
+      if (startPrompts.length > 0) {
+        output.system.unshift(...startPrompts)
+      }
+      if (endPrompts.length > 0) {
+        output.system.push(...endPrompts)
       }
     },
     "experimental.session.compacting": async (input, output) => {
-      const { config } = getNudge(configPath)
-      if (!config["enabled.compaction"]) return
-      if (config["injection.resetCounterOnCompaction"]) {
-        counters.delete(input.sessionID)
+      const resolvedPrompts = getNudge(configPath)
+
+      const promptCounts = counters.get(input.sessionID)
+      if (promptCounts) {
+        for (let i = 0; i < resolvedPrompts.length && i < promptCounts.length; i++) {
+          if (resolvedPrompts[i]["injection.resetCounterOnCompaction"]) {
+            promptCounts[i] = 0
+          }
+        }
       }
-      const nudgeText = loadPrompts(config["prompts"])
-      if (!nudgeText) return
-      if (config["position.compaction"] === "end") {
-        output.context.push(nudgeText)
-      } else {
-        output.context.unshift(nudgeText)
+
+      const startPrompts: string[] = []
+      const endPrompts: string[] = []
+
+      for (const prompt of resolvedPrompts) {
+        if (!prompt["enabled.compaction"]) continue
+        if (prompt["position.compaction"] === "end") {
+          endPrompts.push(prompt.content)
+        } else {
+          startPrompts.push(prompt.content)
+        }
+      }
+
+      if (startPrompts.length > 0) {
+        output.context.unshift(...startPrompts)
+      }
+      if (endPrompts.length > 0) {
+        output.context.push(...endPrompts)
       }
     },
   }
