@@ -20,7 +20,7 @@ type SuperNudgeConfig = {
   "enabled.normalMessage"?: boolean
   "enabled.subagent"?: boolean
   "enabled.compaction"?: boolean
-  "nudge.skipBelowChars"?: number
+  "injection.skipFirstMessageBelowChars"?: number
 }
 
 const projectDir = process.cwd()
@@ -118,7 +118,7 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "enabled.normalMessage": config["enabled.normalMessage"] ?? true,
     "enabled.subagent": config["enabled.subagent"] ?? true,
     "enabled.compaction": config["enabled.compaction"] ?? true,
-    "nudge.skipBelowChars": config["nudge.skipBelowChars"] ?? 3,
+    "injection.skipFirstMessageBelowChars": config["injection.skipFirstMessageBelowChars"] ?? 3,
   }
   fs.writeFileSync(
     path.join(supernudgeDir, "supernudge-configuration.jsonc"),
@@ -453,8 +453,8 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     )
   })
 
-  test("AC14: given nudge.skipBelowChars=50, when short message sent, then message does NOT contain nudge; when long message sent, then message contains nudge", async () => {
-    writeNudgeConfig({ "nudge.skipBelowChars": 50 })
+  test("AC14: given injection.skipFirstMessageBelowChars=50, when short message sent, then message does NOT contain nudge; when long message sent, then message contains nudge", async () => {
+    writeNudgeConfig({ "injection.skipFirstMessageBelowChars": 50 })
     const shortText = await sendMessage("hi")
     assert.ok(!shortText.includes(NUDGE), `short msg must NOT have nudge. Got: ${shortText}`)
 

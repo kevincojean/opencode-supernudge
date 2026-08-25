@@ -96,21 +96,23 @@ Any prompt entry can be an object that overrides specific global settings for th
     // Object with partial overrides: only listed keys override globals
     {
       "path": "~/prompts/givenwhenthen.md",
-      "injection.interval": 3
+      "injection.interval": 3,
+      "injection.skipFirstMessageBelowChars": 10
     },
 
     // Object with all overrides: every global setting overridden
     {
       "path": "~/prompts/no-mocking.md",
-      "injection.interval": 1,
-      "injection.alwaysOnFirstMessage": false,
-      "injection.resetCounterOnCompaction": false,
-      "position.normalMessage": "end",
-      "position.subagent": "end",
-      "position.compaction": "end",
+      "enabled.compaction": false,
       "enabled.normalMessage": true,
       "enabled.subagent": false,
-      "enabled.compaction": false
+      "injection.alwaysOnFirstMessage": false,
+      "injection.interval": 1,
+      "injection.resetCounterOnCompaction": false,
+      "injection.skipFirstMessageBelowChars": 10
+      "position.compaction": "end",
+      "position.normalMessage": "end",
+      "position.subagent": "end"
     }
   ],
   "injection.interval": 1,
@@ -139,7 +141,7 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `wrapper.suffix` | `string` | `"</opencode-supernudge>"` | Marker inserted below each nudge block. Empty string disables. |
 | `nudge.separator` | `string` | `"\n\n"` | Separator between multiple nudges within the same block. |
 | `nudge.enableTitlePrefix` | `boolean` | `true` | Prefix each nudge with `[filename]` (lowercase, no extension). |
-| `nudge.skipBelowChars` | `number` | `3` | Skip injection when user message length `<=` this threshold. |
+| `injection.skipFirstMessageBelowChars` | `number` | `3` | Skip injection when user message length `<=` this threshold. |
 
 All parameters except `prompts` can be overridden per-prompt by including them in the prompt object.
 

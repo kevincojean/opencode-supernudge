@@ -1088,12 +1088,12 @@ test(
 )
 
 test(
-  "given nudge.skipBelowChars=5 and prompt containing NUDGE, when user sends short message (<= 5 chars), then message does NOT contain NUDGE",
+  "given injection.skipFirstMessageBelowChars=5 and prompt containing NUDGE, when user sends short message (<= 5 chars), then message does NOT contain NUDGE",
   async () => {
     const promptPath = createTempPrompts("NUDGE")
     const configPath = writeConfigFile({
       prompts: [promptPath],
-      "nudge.skipBelowChars": 5,
+      "injection.skipFirstMessageBelowChars": 5,
     })
     const plugin = await loadPlugin()
     const hooks = await plugin(stubInput(), { configPath })
@@ -1112,12 +1112,12 @@ test(
 )
 
 test(
-  "given nudge.skipBelowChars=5 and prompt containing NUDGE, when user sends long message (> 5 chars), then message contains NUDGE",
+  "given injection.skipFirstMessageBelowChars=5 and prompt containing NUDGE, when user sends long message (> 5 chars), then message contains NUDGE",
   async () => {
     const promptPath = createTempPrompts("NUDGE")
     const configPath = writeConfigFile({
       prompts: [promptPath],
-      "nudge.skipBelowChars": 5,
+      "injection.skipFirstMessageBelowChars": 5,
     })
     const plugin = await loadPlugin()
     const hooks = await plugin(stubInput(), { configPath })
@@ -1131,6 +1131,72 @@ test(
     assert.ok(
       (output.parts[0] as TextPart).text.includes("NUDGE"),
       `long message must contain NUDGE. Got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
+test(
+  "given two prompts with per-prompt injection.skipFirstMessageBelowChars overrides (0 and 20), when user sends short message, then low-threshold prompt injected and high-threshold prompt skipped",
+  async () => {
+    const promptA = createTempPrompts("NUDGE_A")
+    const promptB = createTempPrompts("NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [
+        { path: promptA, "injection.skipFirstMessageBelowChars": 0 },
+        { path: promptB, "injection.skipFirstMessageBelowChars": 20 },
+      ],
+      "injection.skipFirstMessageBelowChars": 5,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hi")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.ok(
+      text.includes("NUDGE_A"),
+      `low-threshold prompt must inject on short message. Got: ${text}`,
+    )
+    assert.ok(
+      !text.includes("NUDGE_B"),
+      `high-threshold prompt must skip on short message. Got: ${text}`,
+    )
+  },
+)
+
+test(
+  "given two prompts with per-prompt injection.skipFirstMessageBelowChars overrides (0 and 20), when user sends long message, then both prompts injected",
+  async () => {
+    const promptA = createTempPrompts("NUDGE_A")
+    const promptB = createTempPrompts("NUDGE_B")
+    const configPath = writeConfigFile({
+      prompts: [
+        { path: promptA, "injection.skipFirstMessageBelowChars": 0 },
+        { path: promptB, "injection.skipFirstMessageBelowChars": 20 },
+      ],
+      "injection.skipFirstMessageBelowChars": 5,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello world this is long enough")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.ok(
+      text.includes("NUDGE_A"),
+      `low-threshold prompt must inject. Got: ${text}`,
+    )
+    assert.ok(
+      text.includes("NUDGE_B"),
+      `high-threshold prompt must inject on long message. Got: ${text}`,
     )
   },
 )
