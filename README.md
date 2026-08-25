@@ -4,6 +4,19 @@ A plugin for when you really want to make sure your agents never forget about su
 ## Use cases
 Here are examples of `nudges` I use in my workflows which improve agent code-quality ; because I remind them of this ALL the time.
 
+```jsonc
+{
+  "prompts": [
+    "~/.config/opencode/snippet/tdd.md",
+    "~/.config/opencode/snippet/no-mocking.md",
+    "~/.config/opencode/snippet/givenwhenthen.md",
+    "~/.config/opencode/snippet/test-pollution.md",
+    "~/.config/opencode/snippet/docstring-pollution.md",
+    "~/.config/opencode/snippet/disable-question-tool.md"
+  ]
+}
+```
+
 ### Forcing TDD (red-green) development
 ```md
 TDD: YOU MUST respect the RED / GREEN principle - you ALWAYS write a FAILING test case FIRST - this will ENSURE your changes actually fix the problem.
@@ -14,7 +27,7 @@ TDD: YOU MUST respect the RED / GREEN principle - you ALWAYS write a FAILING tes
 Do NOT use MOCKING, EXCEPT when calling external vendors incurs a real life $$$ COST; otherwise we must stick with REAL e2e test cases at the outer-most user-facing SEAM.
 ```
 
-### Forcing a test GivenWhenThen forms
+### Forcing the GivenWhenThen forms for test cases
 ```md 
 You MUST define acceptance criteria in the GivenWhenThen form UNLESS the current project's style guidelines DICTATE otherwise.
 ```
