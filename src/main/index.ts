@@ -4,6 +4,8 @@ import type { ParseError } from "jsonc-parser"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { PrimaryAgentMessageInjector } from "./injectors/primary-agent-message-injector.ts"
+import { SubAgentMessageInjector } from "./injectors/sub-agent-message-injector.ts"
 
 type Position = "start" | "end"
 
@@ -23,6 +25,11 @@ type PromptConfig = {
   "nudge.enableTitlePrefix": boolean
   "nudge.trim": boolean
   "injection.skipFirstMessageBelowChars": number
+  "enabled.autonomous": boolean
+  "injection.autonomousInterval": number
+  "injection.autonomousAlwaysOnFirst": boolean
+  "injection.autonomousResetOnCompaction": boolean
+  "position.autonomous": Position
 }
 
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
@@ -50,6 +57,11 @@ const DEFAULTS: Config = {
   "nudge.enableTitlePrefix": true,
   "nudge.trim": true,
   "injection.skipFirstMessageBelowChars": 3,
+  "enabled.autonomous": false,
+  "injection.autonomousInterval": 1,
+  "injection.autonomousAlwaysOnFirst": true,
+  "injection.autonomousResetOnCompaction": false,
+  "position.autonomous": "start",
 }
 
 function withTitle(prompt: ResolvedPrompt): string {
@@ -135,6 +147,9 @@ const plugin: Plugin = async (_input, options) => {
     : DEFAULT_CONFIG_PATH
 
   const counters = new Map<string, number[]>()
+
+  new PrimaryAgentMessageInjector()
+  new SubAgentMessageInjector()
 
   return {
     "chat.message": async (input, output) => {
