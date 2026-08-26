@@ -4,7 +4,6 @@ import type { ParseError } from "jsonc-parser"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { PrimaryAgentMessageInjector } from "./injectors/primary-agent-message-injector.ts"
 import { SubAgentMessageInjector } from "./injectors/sub-agent-message-injector.ts"
 
 type Position = "start" | "end"
@@ -17,7 +16,8 @@ type PromptConfig = {
   "position.subagent": Position
   "position.compaction": Position
   "enabled.normalMessage": boolean
-  "enabled.subagent": boolean
+  "enabled.subagentSystemPromptNudge": boolean
+  "enabled.subagentAutonomousWorkNudge": boolean
   "enabled.compaction": boolean
   "wrapper.prefix": string
   "wrapper.suffix": string
@@ -25,11 +25,9 @@ type PromptConfig = {
   "nudge.enableTitlePrefix": boolean
   "nudge.trim": boolean
   "injection.skipFirstMessageBelowChars": number
-  "enabled.autonomous": boolean
-  "injection.autonomousInterval": number
-  "injection.autonomousAlwaysOnFirst": boolean
-  "injection.autonomousResetOnCompaction": boolean
-  "position.autonomous": Position
+  "injection.subagentInterval": number
+  "injection.subagentAlwaysOnFirst": boolean
+  "injection.subagentResetOnCompaction": boolean
 }
 
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
@@ -49,7 +47,7 @@ const DEFAULTS: Config = {
   "position.subagent": "start",
   "position.compaction": "start",
   "enabled.normalMessage": true,
-  "enabled.subagent": true,
+  "enabled.subagentSystemPromptNudge": true,
   "enabled.compaction": true,
   "wrapper.prefix": "<opencode-supernudge>",
   "wrapper.suffix": "</opencode-supernudge>",
@@ -57,11 +55,10 @@ const DEFAULTS: Config = {
   "nudge.enableTitlePrefix": true,
   "nudge.trim": true,
   "injection.skipFirstMessageBelowChars": 3,
-  "enabled.autonomous": false,
-  "injection.autonomousInterval": 1,
-  "injection.autonomousAlwaysOnFirst": true,
-  "injection.autonomousResetOnCompaction": false,
-  "position.autonomous": "start",
+  "enabled.subagentAutonomousWorkNudge": false,
+  "injection.subagentInterval": 1,
+  "injection.subagentAlwaysOnFirst": true,
+  "injection.subagentResetOnCompaction": false,
 }
 
 function withTitle(prompt: ResolvedPrompt): string {
@@ -148,10 +145,10 @@ const plugin: Plugin = async (_input, options) => {
 
   const counters = new Map<string, number[]>()
 
-  new PrimaryAgentMessageInjector()
-  new SubAgentMessageInjector()
+  const subAgentInjector = new SubAgentMessageInjector(() => getNudge(configPath).prompts)
 
   return {
+    ...subAgentInjector.hooks(),
     "chat.message": async (input, output) => {
       const { prompts: resolvedPrompts, prefix, suffix, separator } = getNudge(configPath)
       if (resolvedPrompts.length === 0) return
@@ -193,11 +190,8 @@ const plugin: Plugin = async (_input, options) => {
         }
       }
 
-      if (startTexts.length === 0 && endTexts.length === 0) return
-
-      const existing = output.parts.find(p => p.type === "text" && "text" in p)
-      if (!existing) return
-      const target = existing as { text: string }
+      let target = output.parts.find(p => p.type === "text" && "text" in p) as { text: string } | undefined
+      if (!target) return
 
       if (startTexts.length > 0) {
         const block = startTexts.join(separator)
@@ -209,6 +203,23 @@ const plugin: Plugin = async (_input, options) => {
         const wrapped = wrapString(block, prefix, suffix)
         target.text = target.text + "\n\n" + wrapped
       }
+
+      for (let i = 0; i < resolvedPrompts.length; i++) {
+        const prompt = resolvedPrompts[i]
+        if (!prompt["enabled.subagentAutonomousWorkNudge"]) continue
+        if (messageText.length <= skipThreshold(prompt)) continue
+        subAgentInjector.incrementTurnCount(input.sessionID, i)
+        subAgentInjector.inject(input.sessionID, i, {
+          promptIndex: i,
+          interval: prompt["injection.subagentInterval"],
+          alwaysOnFirst: prompt["injection.subagentAlwaysOnFirst"],
+          resetOnCompaction: prompt["injection.subagentResetOnCompaction"],
+          enabled: true,
+          position: prompt["position.subagent"],
+          content: prompt.content,
+          title: prompt.title,
+        }, target)
+      }
     },
     "experimental.chat.system.transform": async (input, output) => {
       if (input.sessionID) return
@@ -219,7 +230,7 @@ const plugin: Plugin = async (_input, options) => {
       const endPrompts: string[] = []
 
       for (const prompt of resolvedPrompts) {
-        if (!prompt["enabled.subagent"]) continue
+        if (!prompt["enabled.subagentSystemPromptNudge"]) continue
         if (prompt["position.subagent"] === "end") {
           endPrompts.push(withTitle(prompt))
         } else {
@@ -238,6 +249,8 @@ const plugin: Plugin = async (_input, options) => {
     },
     "experimental.session.compacting": async (input, output) => {
       const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath)
+
+      subAgentInjector.resetOnCompaction(input.sessionID, resolvedPrompts)
 
       const promptCounts = counters.get(input.sessionID)
       if (promptCounts) {
@@ -269,6 +282,7 @@ const plugin: Plugin = async (_input, options) => {
         output.context.push(...block)
       }
     },
+    ...subAgentInjector.hooks(),
   }
 }
 

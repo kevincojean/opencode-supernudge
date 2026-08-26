@@ -18,9 +18,13 @@ type SuperNudgeConfig = {
   "position.subagent"?: string
   "position.compaction"?: string
   "enabled.normalMessage"?: boolean
-  "enabled.subagent"?: boolean
+  "enabled.subagentSystemPromptNudge"?: boolean
+  "enabled.subagentAutonomousWorkNudge"?: boolean
   "enabled.compaction"?: boolean
   "injection.skipFirstMessageBelowChars"?: number
+  "injection.subagentInterval"?: number
+  "injection.subagentAlwaysOnFirst"?: boolean
+  "injection.subagentResetOnCompaction"?: boolean
 }
 
 const projectDir = process.cwd()
@@ -116,7 +120,11 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "position.subagent": config["position.subagent"] ?? "start",
     "position.compaction": config["position.compaction"] ?? "start",
     "enabled.normalMessage": config["enabled.normalMessage"] ?? true,
-    "enabled.subagent": config["enabled.subagent"] ?? true,
+    "enabled.subagentSystemPromptNudge": config["enabled.subagentSystemPromptNudge"] ?? true,
+    "enabled.subagentAutonomousWorkNudge": config["enabled.subagentAutonomousWorkNudge"] ?? false,
+    "injection.subagentInterval": config["injection.subagentInterval"] ?? 1,
+    "injection.subagentAlwaysOnFirst": config["injection.subagentAlwaysOnFirst"] ?? true,
+    "injection.subagentResetOnCompaction": config["injection.subagentResetOnCompaction"] ?? false,
     "enabled.compaction": config["enabled.compaction"] ?? true,
     "injection.skipFirstMessageBelowChars": config["injection.skipFirstMessageBelowChars"] ?? 3,
   }
@@ -341,7 +349,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
   })
 
   test("AC3: given enabled.subagent=true, when subagent triggered, then nudge injected", async () => {
-    writeNudgeConfig({ "enabled.subagent": true })
+    writeNudgeConfig({ "enabled.subagentSystemPromptNudge": true })
     const session = await client.session.create({ query: { directory: projectDir } })
     const sessionID = session.data!.id
 
@@ -402,6 +410,32 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     const text = await sendMessage("hello")
 
     assert.ok(!text.includes(NUDGE), `missing prompt file = no nudge. Got: ${text}`)
+  })
+
+  test("AC10: given enabled.subagentAutonomousWorkNudge=true and injection.subagentInterval=2, when primary agent sends 3 user messages in same session, then 1st and 3rd messages contain NUDGE", async () => {
+    writeNudgeConfig({
+      "enabled.normalMessage": false,
+      "enabled.subagentSystemPromptNudge": false,
+      "enabled.subagentAutonomousWorkNudge": true,
+      "injection.subagentInterval": 2,
+      "injection.subagentAlwaysOnFirst": true,
+    })
+    const userTexts = await sendMessages(["hello-one", "hello-two", "hello-three"])
+
+    assert.ok(userTexts.length === 3, `expected 3 user messages, got ${userTexts.length}. Texts: ${JSON.stringify(userTexts)}`)
+
+    assert.ok(
+      userTexts[0].includes(NUDGE),
+      `1st message must contain NUDGE (autonomous count=1, alwaysOnFirst). Got: ${userTexts[0]}`,
+    )
+    assert.ok(
+      !userTexts[1].includes(NUDGE),
+      `2nd message must NOT contain NUDGE (autonomous count=2, (2-1)%2=1). Got: ${userTexts[1]}`,
+    )
+    assert.ok(
+      userTexts[2].includes(NUDGE),
+      `3rd message must contain NUDGE (autonomous count=3, (3-1)%2=0). Got: ${userTexts[2]}`,
+    )
   })
 
   test("AC11: given prompt path using tilde and file at $HOME/prompts/nudge.txt, when plugin loads and chat.message fires, then nudge injected", async () => {

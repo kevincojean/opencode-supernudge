@@ -132,10 +132,10 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `injection.alwaysOnFirstMessage` | `boolean` | `true` | Force inject on first user message regardless of interval. |
 | `injection.resetCounterOnCompaction` | `boolean` | `true` | Reset per-session counter to 0 when compaction fires. |
 | `position.normalMessage` | `"start"` \| `"end"` | `"start"` | Nudge placement in user message. `start` = before user text. `end` = after. |
-| `position.subagent` | `"start"` \| `"end"` | `"start"` | Nudge placement in subagent system prompt. |
+| `position.subagent` | `"start"` \| `"end"` | `"start"` | Nudge placement in subagent workflows.|
 | `position.compaction` | `"start"` \| `"end"` | `"start"` | Nudge placement in compaction context. |
 | `enabled.normalMessage` | `boolean` | `true` | Inject nudge on user messages. |
-| `enabled.subagent` | `boolean` | `true` | Inject nudge into system prompt. |
+| `enabled.subagent` | `boolean` | `true` | Inject nudge into subagent workflows. |
 | `enabled.compaction` | `boolean` | `true` | Inject nudge into context on compaction. |
 | `wrapper.prefix` | `string` | `"<opencode-supernudge>"` | Marker inserted above each nudge block. Empty string disables. |
 | `wrapper.suffix` | `string` | `"</opencode-supernudge>"` | Marker inserted below each nudge block. Empty string disables. |
