@@ -32,8 +32,15 @@ function createTempPrompts(content: string): string {
   return writePrompt(dir, "nudge.txt", content)
 }
 
-function writeConfigFile(obj: Record<string, unknown>, comments = true): string {
-  const json = JSON.stringify(obj, null, 2)
+function writeConfigFile(obj: Record<string, unknown>, comments = true, injectConservativeDefaults = true): string {
+  const merged: Record<string, unknown> = injectConservativeDefaults
+    ? {
+        "enabled.subagentAutonomousWorkNudge": false,
+        "injection.subagentResetOnCompaction": false,
+        ...obj,
+      }
+    : obj
+  const json = JSON.stringify(merged, null, 2)
   if (!comments) return createTempConfig(json)
   const jsonc = "// SuperNudge test config\n" + json.replace(/,(\s*[}\]])/g, "$1")
   return createTempConfig(jsonc)
@@ -422,6 +429,8 @@ test(
   "injection.alwaysOnFirstMessage": true,
   /* position default start */
   "enabled.normalMessage": true,
+  "enabled.subagentAutonomousWorkNudge": false,
+  "injection.subagentResetOnCompaction": false,
 }`
     const configPath = createTempConfig(jsonc)
     const plugin = await loadPlugin()
@@ -1202,135 +1211,6 @@ test(
 )
 
 test(
-  "given enabled.subagentAutonomousWorkNudge=true and injection.subagentInterval=2 and enabled.normalMessage=false, when chat.message fires 3 times, then 1st message has NUDGE prepended, 2nd does not, 3rd has NUDGE prepended",
-  async () => {
-    const promptPath = createTempPrompts("NUDGE")
-    const configPath = writeConfigFile({
-      prompts: [promptPath],
-      "enabled.normalMessage": false,
-      "enabled.subagentSystemPromptNudge": false,
-      "enabled.subagentAutonomousWorkNudge": true,
-      "injection.subagentInterval": 2,
-      "injection.subagentAlwaysOnFirst": true,
-      "injection.skipFirstMessageBelowChars": 0,
-    })
-    const plugin = await loadPlugin()
-    const hooks = await plugin(stubInput(), { configPath })
-
-    const firstOut = {
-      message: emptyMessage(),
-      parts: [emptyTextPart("hello-1")],
-    }
-    await hooks["chat.message"]!({ sessionID: "s1" }, firstOut)
-    assert.ok(
-      (firstOut.parts[0] as TextPart).text.includes("NUDGE"),
-      `1st message must include NUDGE, got: ${(firstOut.parts[0] as TextPart).text}`,
-    )
-
-    const secondOut = {
-      message: emptyMessage(),
-      parts: [emptyTextPart("hello-2")],
-    }
-    await hooks["chat.message"]!({ sessionID: "s1" }, secondOut)
-    assert.ok(
-      !(secondOut.parts[0] as TextPart).text.includes("NUDGE"),
-      `2nd message must NOT include NUDGE, got: ${(secondOut.parts[0] as TextPart).text}`,
-    )
-
-    const thirdOut = {
-      message: emptyMessage(),
-      parts: [emptyTextPart("hello-3")],
-    }
-    await hooks["chat.message"]!({ sessionID: "s1" }, thirdOut)
-    assert.ok(
-      (thirdOut.parts[0] as TextPart).text.includes("NUDGE"),
-      `3rd message must include NUDGE, got: ${(thirdOut.parts[0] as TextPart).text}`,
-    )
-  },
-)
-
-test(
-  "given two prompts with enabled.subagentAutonomousWorkNudge=true (A interval=2, B interval=3) and enabled.normalMessage=false, when chat.message fires 6 times, then A injects on 1,3,5 and B injects on 1,4 - independently verified",
-  async () => {
-    const dir = mkTmp()
-    const pA = writePrompt(dir, "nudge_a.txt", "NUDGE_A")
-    const pB = writePrompt(dir, "nudge_b.txt", "NUDGE_B")
-    const configPath = writeConfigFile({
-      prompts: [
-        { path: pA, "injection.subagentInterval": 2 },
-        { path: pB, "injection.subagentInterval": 3 },
-      ],
-      "enabled.normalMessage": false,
-      "enabled.subagentSystemPromptNudge": false,
-      "enabled.subagentAutonomousWorkNudge": true,
-      "injection.subagentAlwaysOnFirst": true,
-      "injection.skipFirstMessageBelowChars": 0,
-    })
-    const plugin = await loadPlugin()
-    const hooks = await plugin(stubInput(), { configPath })
-
-    const fires: number[] = [1, 2, 3, 4, 5, 6]
-    const expected: { a: number[]; b: number[] } = { a: [1, 3, 5], b: [1, 4] }
-
-    for (const n of fires) {
-      const out = {
-        message: emptyMessage(),
-        parts: [emptyTextPart(`hello-${n}`)],
-      }
-      await hooks["chat.message"]!({ sessionID: "s1" }, out)
-      const text = (out.parts[0] as TextPart).text
-      const hasA = text.includes("NUDGE_A")
-      const hasB = text.includes("NUDGE_B")
-      const shouldA = expected.a.includes(n)
-      const shouldB = expected.b.includes(n)
-      assert.strictEqual(hasA, shouldA, `turn ${n}: NUDGE_A expected=${shouldA} got=${hasA}, text=${text}`)
-      assert.strictEqual(hasB, shouldB, `turn ${n}: NUDGE_B expected=${shouldB} got=${hasB}, text=${text}`)
-    }
-  },
-)
-
-test(
-  "given enabled.normalMessage=true and enabled.subagentAutonomousWorkNudge=true on same prompt (user interval=1, autonomous interval=3), when chat.message fires 4 times, then user-nudge present every turn and autonomous-nudge present on turns 1 and 4 only",
-  async () => {
-    const promptPath = createTempPrompts("NUDGE")
-    const configPath = writeConfigFile({
-      prompts: [promptPath],
-      "enabled.normalMessage": true,
-      "enabled.subagentSystemPromptNudge": false,
-      "enabled.subagentAutonomousWorkNudge": true,
-      "injection.interval": 1,
-      "injection.subagentInterval": 3,
-      "injection.subagentAlwaysOnFirst": true,
-      "injection.skipFirstMessageBelowChars": 0,
-      "nudge.separator": " | ",
-    })
-    const plugin = await loadPlugin()
-    const hooks = await plugin(stubInput(), { configPath })
-
-    const autonomousFiresOn: number[] = [1, 4]
-    for (const n of [1, 2, 3, 4] as const) {
-      const out = {
-        message: emptyMessage(),
-        parts: [emptyTextPart(`hello-${n}`)],
-      }
-      await hooks["chat.message"]!({ sessionID: "s1" }, out)
-      const text = (out.parts[0] as TextPart).text
-      const occurrences = (text.match(/NUDGE/g) ?? []).length
-      assert.ok(
-        occurrences >= 1,
-        `turn ${n}: user-counter always injects, expected >=1 NUDGE, got ${occurrences}, text=${text}`,
-      )
-      const expectedAutonomous = autonomousFiresOn.includes(n) ? 1 : 0
-      assert.strictEqual(
-        occurrences,
-        1 + expectedAutonomous,
-        `turn ${n}: expected ${1 + expectedAutonomous} NUDGEs (1 user + ${expectedAutonomous} autonomous), got ${occurrences}, text=${text}`,
-      )
-    }
-  },
-)
-
-test(
   "given enabled.subagentAutonomousWorkNudge=true and injection.subagentInterval=2, when experimental.text.complete fires 3 times for s1 and then experimental.chat.messages.transform fires with messages array for s1, then last message's last text part contains the nudge block",
   async () => {
     const promptPath = createTempPrompts("NUDGE")
@@ -1492,6 +1372,195 @@ test(
     assert.ok(
       !transformAfter.messages[0].parts[0].text.includes("NUDGE"),
       "counter dropped -> count=0 -> inject returns early",
+    )
+  },
+)
+
+test(
+  "given session.created event fired for s1 without parentID (primary session), when experimental.text.complete fires then experimental.chat.messages.transform fires, then last part does NOT contain NUDGE (autonomous must skip on primary sessions)",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({ prompts: [promptPath] }, true, false)
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const eventHook = hooks.event!
+    const textComplete = hooks["experimental.text.complete"]!
+    const messagesTransform = hooks["experimental.chat.messages.transform"]!
+
+    await eventHook({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "s1" } },
+      },
+    } as unknown as Parameters<typeof eventHook>[0])
+
+    await textComplete(
+      { sessionID: "s1", messageID: "m0", partID: "p0" },
+      { text: "assistant-0" },
+    )
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "info1", role: "assistant" },
+          parts: [{ type: "text", text: "previous assistant message" }],
+        },
+      ],
+    }
+    await messagesTransform({}, transformOut as unknown as Parameters<typeof messagesTransform>[1])
+
+    const lastPart = transformOut.messages[transformOut.messages.length - 1].parts[0]
+    assert.ok(
+      !(lastPart as { text: string }).text.includes("NUDGE"),
+      `primary session - autonomous must NOT inject. Got: ${JSON.stringify(transformOut.messages)}`,
+    )
+  },
+)
+
+test(
+  "given session.created event fired for s1 with parentID (subagent session), when experimental.text.complete fires then experimental.chat.messages.transform fires, then last part contains NUDGE (autonomous injects on subagent sessions)",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({ prompts: [promptPath] }, true, false)
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const eventHook = hooks.event!
+    const textComplete = hooks["experimental.text.complete"]!
+    const messagesTransform = hooks["experimental.chat.messages.transform"]!
+
+    await eventHook({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "s1", parentID: "primary-session-id" } },
+      },
+    } as unknown as Parameters<typeof eventHook>[0])
+
+    await textComplete(
+      { sessionID: "s1", messageID: "m0", partID: "p0" },
+      { text: "assistant-0" },
+    )
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "info1", role: "assistant" },
+          parts: [{ type: "text", text: "previous assistant message" }],
+        },
+      ],
+    }
+    await messagesTransform({}, transformOut as unknown as Parameters<typeof messagesTransform>[1])
+
+    const lastPart = transformOut.messages[transformOut.messages.length - 1].parts[0]
+    assert.ok(
+      (lastPart as { text: string }).text.includes("NUDGE"),
+      `subagent session - autonomous must inject. Got: ${JSON.stringify(transformOut.messages)}`,
+    )
+  },
+)
+
+test(
+  "given default config (both enabled.normalMessage=true and enabled.subagentAutonomousWorkNudge=true), when chat.message fires once, then user message contains exactly ONE nudge block (autonomous path should NOT fire on chat.message for primary, only via experimental hooks)",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({ prompts: [promptPath] }, true, false)
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello world this is a long enough message")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    const nudgeCount = text.split("NUDGE").length - 1
+    assert.strictEqual(
+      nudgeCount,
+      1,
+      `chat.message must fire exactly ONE nudge block, got ${nudgeCount}. Text: ${text}`,
+    )
+  },
+)
+
+test(
+  "given no config file exists, when experimental.text.complete fires then experimental.chat.messages.transform fires, then last message's last text part contains the nudge block (default enabled.subagentAutonomousWorkNudge=true, default injection.subagentResetOnCompaction=true)",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({ prompts: [promptPath] }, true, false)
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const textComplete = hooks["experimental.text.complete"]
+    assert.ok(textComplete, "experimental.text.complete hook must be registered")
+    const messagesTransform = hooks["experimental.chat.messages.transform"]
+    assert.ok(messagesTransform, "experimental.chat.messages.transform hook must be registered")
+
+    await textComplete!(
+      { sessionID: "s1", messageID: "m0", partID: "p0" },
+      { text: "assistant-0" },
+    )
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "info1", role: "assistant" },
+          parts: [{ type: "text", text: "previous assistant message" }],
+        },
+      ],
+    }
+    await messagesTransform!({}, transformOut as unknown as Parameters<NonNullable<typeof messagesTransform>>[1])
+
+    const lastPart = transformOut.messages[transformOut.messages.length - 1].parts[0]
+    assert.ok(
+      (lastPart as { text: string }).text.includes("NUDGE"),
+      `defaults must enable autonomous nudge - last text part must contain NUDGE, got: ${JSON.stringify(transformOut.messages)}`,
+    )
+  },
+)
+
+test(
+  "given enabled.subagentAutonomousWorkNudge=true and no explicit injection.subagentResetOnCompaction, when text.complete fires then session.compacting fires then messages.transform fires, then last part does NOT contain NUDGE (default injection.subagentResetOnCompaction=true resets counter)",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "enabled.subagentAutonomousWorkNudge": true,
+      "enabled.normalMessage": false,
+      "enabled.subagentSystemPromptNudge": false,
+    }, true, false)
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const textComplete = hooks["experimental.text.complete"]!
+    const messagesTransform = hooks["experimental.chat.messages.transform"]!
+    const sessionCompacting = hooks["experimental.session.compacting"]!
+
+    await textComplete(
+      { sessionID: "s1", messageID: "m0", partID: "p0" },
+      { text: "assistant-0" },
+    )
+
+    await sessionCompacting(
+      { sessionID: "s1" },
+      { context: [] } as unknown as Parameters<typeof sessionCompacting>[1],
+    )
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "info1", role: "assistant" },
+          parts: [{ type: "text", text: "previous assistant message" }],
+        },
+      ],
+    }
+    await messagesTransform({}, transformOut as unknown as Parameters<typeof messagesTransform>[1])
+
+    const lastPart = transformOut.messages[transformOut.messages.length - 1].parts[0]
+    assert.ok(
+      !(lastPart as { text: string }).text.includes("NUDGE"),
+      `default injection.subagentResetOnCompaction must be true - compaction should reset counter so next messages.transform does NOT inject, got: ${JSON.stringify(transformOut.messages)}`,
     )
   },
 )

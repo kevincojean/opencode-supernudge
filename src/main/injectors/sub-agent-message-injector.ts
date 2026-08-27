@@ -11,6 +11,7 @@ function shouldInject(count: number, interval: number, alwaysOnFirst: boolean): 
 
 export class SubAgentMessageInjector implements TurnBoundMessageInjector {
   private counters = new Map<string, number[]>()
+  private primarySessions = new Set<string>()
   private resolvePrompts: () => ResolvedAutonomousPrompt[]
 
   constructor(resolvePrompts: () => ResolvedAutonomousPrompt[]) {
@@ -27,6 +28,7 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
 
   resetTurnCount(sessionID: string): void {
     this.counters.delete(sessionID)
+    this.primarySessions.delete(sessionID)
   }
 
   resetOnCompaction(sessionID: string, prompts: ResolvedAutonomousPrompt[]): void {
@@ -74,6 +76,15 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
     }
   }
 
+  private trackSession(info: { id?: string; parentID?: string }): void {
+    if (!info.id) return
+    if (info.parentID) {
+      this.primarySessions.delete(info.id)
+    } else {
+      this.primarySessions.add(info.id)
+    }
+  }
+
   hooks(): Partial<Hooks> {
     return {
       "experimental.text.complete": async (input) => {
@@ -93,6 +104,7 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
         if (!lastPart || lastPart.type !== "text") return
         const sessionID = (lastMessage.info as { sessionID?: string }).sessionID
         if (!sessionID) return
+        if (this.primarySessions.has(sessionID)) return
         for (let i = 0; i < prompts.length; i++) {
           const prompt = prompts[i]
           if (!prompt["enabled.subagentAutonomousWorkNudge"]) continue
@@ -100,11 +112,21 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
         }
       },
       event: async (input) => {
-        const e = input.event as { type?: string; properties?: { info?: { id?: string } }; syncEvent?: { type?: string; data?: { sessionID?: string } } }
-        if (e.type === "session.deleted") {
+        const e = input.event as {
+          type?: string
+          properties?: { info?: { id?: string; parentID?: string } }
+          syncEvent?: { type?: string; data?: { sessionID?: string } }
+        }
+        if (e.type === "session.created" || e.type === "session.updated") {
+          if (e.properties?.info) this.trackSession(e.properties.info)
+        } else if (e.type === "session.deleted") {
           const id = e.properties?.info?.id
           if (id) this.resetTurnCount(id)
-        } else if (e.type === "sync" && e.syncEvent?.type === "session.deleted.1" && e.syncEvent.data?.sessionID) {
+        } else if (
+          e.type === "sync" &&
+          e.syncEvent?.type === "session.deleted.1" &&
+          e.syncEvent.data?.sessionID
+        ) {
           this.resetTurnCount(e.syncEvent.data.sessionID)
         }
       },

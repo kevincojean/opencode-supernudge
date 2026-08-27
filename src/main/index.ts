@@ -55,10 +55,10 @@ const DEFAULTS: Config = {
   "nudge.enableTitlePrefix": true,
   "nudge.trim": true,
   "injection.skipFirstMessageBelowChars": 3,
-  "enabled.subagentAutonomousWorkNudge": false,
+  "enabled.subagentAutonomousWorkNudge": true,
   "injection.subagentInterval": 1,
   "injection.subagentAlwaysOnFirst": true,
-  "injection.subagentResetOnCompaction": false,
+  "injection.subagentResetOnCompaction": true,
 }
 
 function withTitle(prompt: ResolvedPrompt): string {
@@ -202,23 +202,6 @@ const plugin: Plugin = async (_input, options) => {
         const block = endTexts.join(separator)
         const wrapped = wrapString(block, prefix, suffix)
         target.text = target.text + "\n\n" + wrapped
-      }
-
-      for (let i = 0; i < resolvedPrompts.length; i++) {
-        const prompt = resolvedPrompts[i]
-        if (!prompt["enabled.subagentAutonomousWorkNudge"]) continue
-        if (messageText.length <= skipThreshold(prompt)) continue
-        subAgentInjector.incrementTurnCount(input.sessionID, i)
-        subAgentInjector.inject(input.sessionID, i, {
-          promptIndex: i,
-          interval: prompt["injection.subagentInterval"],
-          alwaysOnFirst: prompt["injection.subagentAlwaysOnFirst"],
-          resetOnCompaction: prompt["injection.subagentResetOnCompaction"],
-          enabled: true,
-          position: prompt["position.subagent"],
-          content: prompt.content,
-          title: prompt.title,
-        }, target)
       }
     },
     "experimental.chat.system.transform": async (input, output) => {
