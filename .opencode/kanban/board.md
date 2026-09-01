@@ -1,4 +1,4 @@
-## New (7)
+## New (8)
 - [Scope behaviour to specific agents](tasks/T-002.md)
 - [configuration toggle which allows the injected nudges to be fully synthetic and invisible to the user](tasks/T-009.md)
 - [Allow skipping nudge if message contains any of the substrings (glob patterns): eg (omo [search-mode] [analyse-mode]))](tasks/T-011.md)
@@ -6,6 +6,7 @@
 - [bug: prevent injection on OmO injected prompts](tasks/T-013.md)
 - [feat: add cap to how many nudges can be inserted at a time?](tasks/T-014.md)
 - [Scope behaviour to specific llm models](tasks/T-015.md)
+- [nudge - allow a per-project configuration file](tasks/T-016.md)
 ## Accepted (0)
 ## Breakdown (0)
 ## Ready (0)
