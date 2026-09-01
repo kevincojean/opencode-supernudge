@@ -140,7 +140,7 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "nudge.enableTitlePrefix": config["nudge.enableTitlePrefix"] ?? true,
     "nudge.trim": config["nudge.trim"] ?? true,
     "currentWorkingDirectory.configFilePath": config["currentWorkingDirectory.configFilePath"] ?? path.join(supernudgeDir, "supernudge-configuration.jsonc"),
-    "currentWorkingDirectory.configEnabled": config["currentWorkingDirectory.configEnabled"] ?? true,
+    "currentWorkingDirectory.configEnabled": config["currentWorkingDirectory.configEnabled"] ?? false,
   }
   fs.writeFileSync(
     path.join(supernudgeDir, "supernudge-configuration.jsonc"),

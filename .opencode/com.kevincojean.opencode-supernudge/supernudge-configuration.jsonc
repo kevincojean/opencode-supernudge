@@ -1,0 +1,8 @@
+{
+  "prompts": [
+    {
+      "path": ".opencode/com.kevincojean.opencode-supernudge/dont-run-e2e.md",
+      "injection.interval": 1
+    }
+  ]
+}
