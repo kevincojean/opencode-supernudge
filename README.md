@@ -90,7 +90,8 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 
 ### Prompt path resolution
 
-### Project-local config
+<details>
+<summary><strong>Project-local config</strong></summary>
 
 A project-local config file can overlay the global config. Two global config keys control this:
 
@@ -99,9 +100,39 @@ A project-local config file can overlay the global config. Two global config key
 | `currentWorkingDirectory.configFilePath` | string | `"./.opencode/com.kevincojean.opencode-supernudge/supernudge-configuration.jsonc"` | Path to local config (relative to opencode cwd) |
 | `currentWorkingDirectory.configEnabled` | boolean | `true` | Master switch for local config lookup |
 
-When enabled, the plugin looks for a local config file at the resolved path. If found and valid, the local config's `prompts` array is **concatenated** with the global config's `prompts` array. All other keys in the local config are **ignored** - only `prompts` is locally overridable. Per-prompt overrides (e.g. `injection.interval`, `enabled.*`) work within local config's `prompts` entries via the [per-prompt override](#per-prompt-override) mechanism.
+When enabled, the plugin looks for a local config file. If found and valid, the local config's `prompts` array is **merged** with the global config's `prompts` array.
 
-If the local config has parse errors, a toast notification (error level) is shown and the plugin falls back to the global config only.
+#### Locally overridable keys
+
+| Key | Locally overridable? |
+|-----|---------------------|
+| `prompts` | **YES** (concatenated with global) |
+
+**Keys overridable within `prompt` objects:
+
+| Prompt-key | Overridable? |
+|-----|---------------------|
+| `injection.interval` | YES |
+| `injection.alwaysOnFirstMessage` | YES |
+| `injection.resetCounterOnCompaction` | NO |
+| `position.normalMessage` | YES |
+| `position.subagent` | YES |
+| `position.compaction` | YES |
+| `enabled.normalMessage` | YES |
+| `enabled.subagentSystemPromptNudge` | YES |
+| `enabled.subagentAutonomousWorkNudge` | YES |
+| `enabled.compaction` | YES |
+| `wrapper.prefix` | NO |
+| `wrapper.suffix` | NO |
+| `nudge.separator` | NO |
+| `nudge.enableTitlePrefix` | NO |
+| `nudge.trim` | NO |
+| `injection.skipFirstMessageBelowChars` | NO |
+| `injection.subagentInterval` | YES |
+| `injection.subagentAlwaysOnFirst` | YES |
+| `injection.subagentResetOnCompaction` | NO |
+| `currentWorkingDirectory.configFilePath` | NO |
+| `currentWorkingDirectory.configEnabled` | NO |
 
 Example local config:
 ```jsonc
@@ -116,6 +147,8 @@ Example local config:
   ]
 }
 ```
+
+</details>
 
 Prompt file paths in the `prompts` array support 3 modes:
 
@@ -134,7 +167,8 @@ Prompt file paths in the `prompts` array support 3 modes:
    { "prompts": ["/home/user/prompts/tdd.md"] }
    ```
 
-### Subagent nudge paths
+<details>
+<summary><strong>Subagent nudge paths</strong></summary>
 
 There are **two distinct paths** for injecting nudges into subagent contexts. They are gated separately and have independent defaults:
 
@@ -149,6 +183,11 @@ To disable periodic nudges, set:
 ```
 
 > The legacy key `enabled.subagent` is no longer recognized. If your config still has it, replace it with the two `enabled.subagent*` keys above.
+
+</details>
+
+<details>
+<summary><strong>Per-prompt override</strong></summary>
 
 ### Per-prompt override
 Any prompt entry can be an object that overrides specific global settings for that prompt only. String entries use all global defaults.
@@ -194,6 +233,8 @@ Any prompt entry can be an object that overrides specific global settings for th
 - `givenwhenthen.md` - partial override, injects every 3rd message only
 - `no-mocking.md` - full override, all globals ignored, uses its own settings exclusively
 
+</details>
+
 ### Parameters
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -220,7 +261,9 @@ Any prompt entry can be an object that overrides specific global settings for th
 
 All parameters except `prompts` can be overridden per-prompt by including them in the prompt object.
 
-## Test
+<details>
+<summary><strong>Test</strong></summary>
+
 ```bash
 # Unit tests
 node --import tsx --test src/test/supernudge.test.ts
@@ -230,6 +273,8 @@ node --import tsx --test src/test/supernudge.test.ts
 # Remove it from package.json to use bwrap sandboxing instead
 npm run test:e2e
 ```
+
+</details>
 
 ## Roadmap
 You can see what I have in mind for next features by reading my humble [kanban board](.opencode/kanban/board.md).

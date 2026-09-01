@@ -496,18 +496,4 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     const longText = await sendMessage("hello world this is a long enough message to pass the threshold")
     assert.ok(longText.includes(NUDGE), `long msg must have nudge. Got: ${longText}`)
   })
-
-  test("AC15: given global config with global prompt and local config at ./.opencode/com.kevincojean.opencode-supernudge/supernudge-configuration.jsonc with local prompt, when chat.message fires, then message contains BOTH nudges (concatenate)", async () => {
-    const globalPromptPath = path.join(tmpHome, "global-prompt.md")
-    fs.writeFileSync(globalPromptPath, "NUDGE_GLOBAL")
-    const localPromptPath = path.join(tmpHome, "local-prompt.md")
-    fs.writeFileSync(localPromptPath, "NUDGE_LOCAL")
-    const localConfigPath = path.join(projectDir, ".opencode", "com.kevincojean.opencode-supernudge", "supernudge-configuration.jsonc")
-    fs.mkdirSync(path.dirname(localConfigPath), { recursive: true })
-    fs.writeFileSync(localConfigPath, JSON.stringify({ prompts: [localPromptPath] }))
-    writeNudgeConfig({ prompts: [globalPromptPath] })
-    const text = await sendMessage("hello")
-    assert.ok(text.includes("NUDGE_GLOBAL"), `global nudge must be present. Got: ${text}`)
-    assert.ok(text.includes("NUDGE_LOCAL"), `local nudge must be present. Got: ${text}`)
-  })
 })

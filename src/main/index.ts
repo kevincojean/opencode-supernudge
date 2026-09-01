@@ -116,14 +116,18 @@ function loadLocalConfig(configPath: string, client: PluginInput["client"]): Con
   return { ...DEFAULTS, ...(parsed as Record<string, unknown>) } as Config
 }
 
+const LOCALLY_OVERRIDABLE_KEYS = new Set<keyof Config>(["prompts"])
+
 function mergeConfigs(global: Config, local: Config): Config {
-  // Only `prompts` is locally overridable. All other keys are global-only.
-  // Per-prompt overrides (e.g. injection.interval, enabled.*) work via
-  // the existing resolvePrompts spread: { ...defaults, ...obj } in each prompt entry.
-  return {
-    ...global,
-    "prompts": [...global.prompts, ...local.prompts],
+  const merged = { ...global }
+  for (const key of Object.keys(local) as (keyof Config)[]) {
+    if (LOCALLY_OVERRIDABLE_KEYS.has(key)) {
+      if (key === "prompts") {
+        merged[key] = [...global[key], ...local[key]] as Config["prompts"]
+      }
+    }
   }
+  return merged
 }
 
 function loadConfig(configPath: string): Config {
