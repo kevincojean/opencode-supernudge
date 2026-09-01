@@ -16,3 +16,9 @@ E2E tests spawned `opencode serve` inside `bwrap` with `detached: true`. The `pr
 
 ### AC1 timeout at 30s - increased to 60s
 AC1 sends 3 sequential prompts in one session via `sendMessages`. Each `client.session.prompt` is a full round-trip through opencode serve + stub LLM. 30s timeout was too tight for 3 round trips. Increased `--test-timeout` to 60000ms.
+
+### AC10 deleted: contradicted T-001 bug fix part 2
+AC10 expected autonomous nudge on PRIMARY agent messages, but T-001 bug fix part 2 explicitly blocks autonomous injection on primary sessions via `primarySessions` set. Test could never pass against current code. Deleted. Unit tests for subagent autonomous path (where `primarySessions` does NOT contain the session) remain valid and pass.
+
+### AC12: relative path resolution verified in e2e
+T-012 added AC12: creates `projectDir/prompts/nudge.txt`, config uses `./prompts/nudge.txt`, verifies nudge injected via `chat.message`. PASSES. Confirms `PluginInput.directory` is correctly threaded as `baseDir` through the real opencode runtime. Cleanup removes the created file and directory after assertion.

@@ -88,6 +88,26 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 }
 ```
 
+### Prompt path resolution
+
+Prompt file paths in the `prompts` array support three resolution modes:
+
+1. **Home directory** - paths starting with `~` or containing `$HOME` are resolved against the user's home directory:
+   ```jsonc
+   { "prompts": ["~/prompts/tdd.md", "$HOME/prompts/no-mocking.md"] }
+   ```
+
+2. **Relative paths** - paths that are not absolute (don't start with `/`, `~`, or `$HOME`) are resolved against opencode's working directory (the project directory opencode was launched in):
+   ```jsonc
+   { "prompts": ["./prompts/tdd.md", "prompts/no-mocking.md", "../shared/constraints.md"] }
+   ```
+   Both `./prompts/...` and bare `prompts/...` work. `../` is also supported to reach files in parent directories.
+
+3. **Absolute paths** - paths starting with `/` are used as-is:
+   ```jsonc
+   { "prompts": ["/home/user/prompts/tdd.md"] }
+   ```
+
 ### Subagent nudge paths
 
 There are **two distinct paths** for injecting nudges into subagent contexts. They are gated separately and have independent defaults:
@@ -151,7 +171,7 @@ Any prompt entry can be an object that overrides specific global settings for th
 ### Parameters
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `prompts` | `(string \| object)[]` | `[]` | Prompt file paths. String or `{ path: string, ...overrides }`. Supports $HOME and ~ interpolation. |
+| `prompts` | `(string \| object)[]` | `[]` | Prompt file paths. String or `{ path: string, ...overrides }`. Supports `~`, `$HOME` interpolation, and relative paths (resolved against opencode's working directory). |
 | `injection.interval` | `number` | `1` | Inject every Nth *user* message. `1` = every message. `2` = 1st, skip 2nd, inject 3rd. |
 | `injection.alwaysOnFirstMessage` | `boolean` | `true` | Force inject on first user message regardless of interval. |
 | `injection.resetCounterOnCompaction` | `boolean` | `true` | Reset per-session counter to 0 when compaction fires. |

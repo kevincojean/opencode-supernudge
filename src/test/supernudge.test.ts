@@ -981,6 +981,99 @@ test(
 )
 
 test(
+  "given config with relative prompt path using ./ prefix and PluginInput.directory set, when chat.message fires, then nudge loaded from file relative to directory",
+  async () => {
+    const dir = mkTmp()
+    const promptsDir = path.join(dir, "prompts")
+    fs.mkdirSync(promptsDir, { recursive: true })
+    const promptPath = path.join(promptsDir, "nudge.txt")
+    fs.writeFileSync(promptPath, "NUDGE_RELATIVE", "utf-8")
+
+    const configPath = writeConfigFile({
+      prompts: ["./prompts/nudge.txt"],
+    })
+    const input = stubInput()
+    input.directory = dir
+    input.worktree = dir
+    const plugin = await loadPlugin()
+    const hooks = await plugin(input, { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok(
+      (output.parts[0] as TextPart).text.includes("NUDGE_RELATIVE"),
+      `relative ./ path nudge must be loaded. Got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
+test(
+  "given config with bare relative path (no ./ prefix) and PluginInput.directory set, when chat.message fires, then nudge loaded from file relative to directory",
+  async () => {
+    const dir = mkTmp()
+    const promptsDir = path.join(dir, "prompts")
+    fs.mkdirSync(promptsDir, { recursive: true })
+    const promptPath = path.join(promptsDir, "nudge.txt")
+    fs.writeFileSync(promptPath, "NUDGE_BARE", "utf-8")
+
+    const configPath = writeConfigFile({
+      prompts: ["prompts/nudge.txt"],
+    })
+    const input = stubInput()
+    input.directory = dir
+    input.worktree = dir
+    const plugin = await loadPlugin()
+    const hooks = await plugin(input, { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok(
+      (output.parts[0] as TextPart).text.includes("NUDGE_BARE"),
+      `bare relative path nudge must be loaded. Got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
+test(
+  "given config with ../ relative path and PluginInput.directory set to subdir, when chat.message fires, then nudge loaded from parent dir",
+  async () => {
+    const dir = mkTmp()
+    const subdir = path.join(dir, "sub")
+    fs.mkdirSync(subdir, { recursive: true })
+    fs.mkdirSync(path.join(dir, "prompts"), { recursive: true })
+    fs.writeFileSync(path.join(dir, "prompts", "nudge.txt"), "NUDGE_PARENT", "utf-8")
+
+    const configPath = writeConfigFile({
+      prompts: ["../prompts/nudge.txt"],
+    })
+    const input = stubInput()
+    input.directory = subdir
+    input.worktree = subdir
+    const plugin = await loadPlugin()
+    const hooks = await plugin(input, { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok(
+      (output.parts[0] as TextPart).text.includes("NUDGE_PARENT"),
+      `../ relative path nudge must be loaded from parent. Got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
+test(
   "given default config and prompt file with leading/trailing newlines and spaces around NUDGE, when chat.message fires, then nudge content trimmed of leading/trailing whitespace",
   async () => {
     const promptPath = createTempPrompts("\n\n  NUDGE  \n\n")

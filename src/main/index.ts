@@ -82,12 +82,16 @@ function wrapArray(items: string[], prefix: string, suffix: string): string[] {
   return result
 }
 
-function resolvePath(p: string): string {
-  const home = process.env.HOME
+function resolvePath(p: string, baseDir: string): string {
   if (p.startsWith("~")) {
     return path.join(os.homedir(), p.slice(1))
   }
-  return home ? p.split("$HOME").join(home) : p
+  const home = process.env.HOME
+  const withHome = home ? p.split("$HOME").join(home) : p
+  if (!path.isAbsolute(withHome)) {
+    return path.resolve(baseDir, withHome)
+  }
+  return withHome
 }
 
 function loadConfig(configPath: string): Config {
@@ -104,12 +108,13 @@ function loadConfig(configPath: string): Config {
 function resolvePrompts(
   prompts: readonly PromptEntry[],
   defaults: PromptConfig,
+  baseDir: string,
 ): ResolvedPrompt[] {
   const result: ResolvedPrompt[] = []
   for (const entry of prompts) {
     const obj = typeof entry === "string" ? { path: entry } : entry
     const resolved: PromptConfig = { ...defaults, ...obj } as PromptConfig
-    const filePath = resolvePath(obj.path)
+    const filePath = resolvePath(obj.path, baseDir)
     if (!fs.existsSync(filePath)) continue
     const rawContent = fs.readFileSync(filePath, "utf-8")
     const content = resolved["nudge.trim"] ? rawContent.trim() : rawContent
@@ -121,11 +126,11 @@ function resolvePrompts(
   return result
 }
 
-function getNudge(configPath: string): { prompts: ResolvedPrompt[]; prefix: string; suffix: string; separator: string } {
+function getNudge(configPath: string, baseDir: string): { prompts: ResolvedPrompt[]; prefix: string; suffix: string; separator: string } {
   const config = loadConfig(configPath)
   const { prompts, ...defaults } = config
   return {
-    prompts: resolvePrompts(prompts, defaults),
+    prompts: resolvePrompts(prompts, defaults, baseDir),
     prefix: defaults["wrapper.prefix"],
     suffix: defaults["wrapper.suffix"],
     separator: defaults["nudge.separator"],
@@ -137,7 +142,8 @@ const DEFAULT_CONFIG_PATH = path.join(
   ".config/opencode/opencode-supernudge/supernudge-configuration.jsonc",
 )
 
-const plugin: Plugin = async (_input, options) => {
+const plugin: Plugin = async (input, options) => {
+  const baseDir = input.directory
   const optConfigPath = options?.configPath
   const configPath = typeof optConfigPath === "string"
     ? optConfigPath
@@ -145,12 +151,12 @@ const plugin: Plugin = async (_input, options) => {
 
   const counters = new Map<string, number[]>()
 
-  const subAgentInjector = new SubAgentMessageInjector(() => getNudge(configPath).prompts)
+  const subAgentInjector = new SubAgentMessageInjector(() => getNudge(configPath, baseDir).prompts)
 
   return {
     ...subAgentInjector.hooks(),
     "chat.message": async (input, output) => {
-      const { prompts: resolvedPrompts, prefix, suffix, separator } = getNudge(configPath)
+      const { prompts: resolvedPrompts, prefix, suffix, separator } = getNudge(configPath, baseDir)
       if (resolvedPrompts.length === 0) return
 
       let promptCounts = counters.get(input.sessionID)
@@ -206,7 +212,7 @@ const plugin: Plugin = async (_input, options) => {
     },
     "experimental.chat.system.transform": async (input, output) => {
       if (input.sessionID) return
-      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath)
+      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath, baseDir)
       if (resolvedPrompts.length === 0) return
 
       const startPrompts: string[] = []
@@ -231,7 +237,7 @@ const plugin: Plugin = async (_input, options) => {
       }
     },
     "experimental.session.compacting": async (input, output) => {
-      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath)
+      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath, baseDir)
 
       subAgentInjector.resetOnCompaction(input.sessionID, resolvedPrompts)
 

@@ -412,32 +412,6 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     assert.ok(!text.includes(NUDGE), `missing prompt file = no nudge. Got: ${text}`)
   })
 
-  test("AC10: given enabled.subagentAutonomousWorkNudge=true and injection.subagentInterval=2, when primary agent sends 3 user messages in same session, then 1st and 3rd messages contain NUDGE", async () => {
-    writeNudgeConfig({
-      "enabled.normalMessage": false,
-      "enabled.subagentSystemPromptNudge": false,
-      "enabled.subagentAutonomousWorkNudge": true,
-      "injection.subagentInterval": 2,
-      "injection.subagentAlwaysOnFirst": true,
-    })
-    const userTexts = await sendMessages(["hello-one", "hello-two", "hello-three"])
-
-    assert.ok(userTexts.length === 3, `expected 3 user messages, got ${userTexts.length}. Texts: ${JSON.stringify(userTexts)}`)
-
-    assert.ok(
-      userTexts[0].includes(NUDGE),
-      `1st message must contain NUDGE (autonomous count=1, alwaysOnFirst). Got: ${userTexts[0]}`,
-    )
-    assert.ok(
-      !userTexts[1].includes(NUDGE),
-      `2nd message must NOT contain NUDGE (autonomous count=2, (2-1)%2=1). Got: ${userTexts[1]}`,
-    )
-    assert.ok(
-      userTexts[2].includes(NUDGE),
-      `3rd message must contain NUDGE (autonomous count=3, (3-1)%2=0). Got: ${userTexts[2]}`,
-    )
-  })
-
   test("AC11: given prompt path using tilde and file at $HOME/prompts/nudge.txt, when plugin loads and chat.message fires, then nudge injected", async () => {
     const promptsDir = path.join(tmpHome, "prompts")
     fs.mkdirSync(promptsDir, { recursive: true })
@@ -446,6 +420,19 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     const text = await sendMessage("hello")
 
     assert.ok(text.includes(NUDGE), `tilde path nudge. Got: ${text}`)
+  })
+
+  test("AC12: given relative prompt path ./prompts/nudge.txt and file at projectDir/prompts/nudge.txt, when chat.message fires, then nudge injected", async () => {
+    const relativePromptsDir = path.join(projectDir, "prompts")
+    fs.mkdirSync(relativePromptsDir, { recursive: true })
+    fs.writeFileSync(path.join(relativePromptsDir, "nudge.txt"), NUDGE)
+    writeNudgeConfig({ prompts: ["./prompts/nudge.txt"] })
+    const text = await sendMessage("hello")
+
+    assert.ok(text.includes(NUDGE), `relative path nudge. Got: ${text}`)
+
+    fs.unlinkSync(path.join(relativePromptsDir, "nudge.txt"))
+    fs.rmdirSync(relativePromptsDir)
   })
 
   test("AC13: given enabled.compaction=false, when session.compacting fires, then context does NOT contain nudge", async () => {
