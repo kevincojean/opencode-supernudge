@@ -412,7 +412,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     assert.ok(!text.includes(NUDGE), `missing prompt file = no nudge. Got: ${text}`)
   })
 
-  test("AC11: given prompt path using tilde and file at $HOME/prompts/nudge.txt, when plugin loads and chat.message fires, then nudge injected", async () => {
+  test("AC10: given prompt path using tilde and file at $HOME/prompts/nudge.txt, when plugin loads and chat.message fires, then nudge injected", async () => {
     const promptsDir = path.join(tmpHome, "prompts")
     fs.mkdirSync(promptsDir, { recursive: true })
     fs.writeFileSync(path.join(promptsDir, "nudge.txt"), NUDGE)
@@ -422,7 +422,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     assert.ok(text.includes(NUDGE), `tilde path nudge. Got: ${text}`)
   })
 
-  test("AC12: given relative prompt path ./prompts/nudge.txt and file at projectDir/prompts/nudge.txt, when chat.message fires, then nudge injected", async () => {
+  test("AC11: given relative prompt path ./prompts/nudge.txt and file at projectDir/prompts/nudge.txt, when chat.message fires, then nudge injected", async () => {
     const relativePromptsDir = path.join(projectDir, "prompts")
     fs.mkdirSync(relativePromptsDir, { recursive: true })
     fs.writeFileSync(path.join(relativePromptsDir, "nudge.txt"), NUDGE)
@@ -435,7 +435,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     fs.rmdirSync(relativePromptsDir)
   })
 
-  test("AC13: given enabled.compaction=false, when session.compacting fires, then context does NOT contain nudge", async () => {
+  test("AC12: given enabled.compaction=false, when session.compacting fires, then context does NOT contain nudge", async () => {
     writeNudgeConfig({ "enabled.compaction": false })
     const session = await client.session.create({ query: { directory: projectDir } })
     const sessionID = session.data!.id
@@ -474,7 +474,7 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     )
   })
 
-  test("AC14: given injection.skipFirstMessageBelowChars=50, when short message sent, then message does NOT contain nudge; when long message sent, then message contains nudge", async () => {
+  test("AC13: given injection.skipFirstMessageBelowChars=50, when short message sent, then message does NOT contain nudge; when long message sent, then message contains nudge", async () => {
     writeNudgeConfig({ "injection.skipFirstMessageBelowChars": 50 })
     const shortText = await sendMessage("hi")
     assert.ok(!shortText.includes(NUDGE), `short msg must NOT have nudge. Got: ${shortText}`)

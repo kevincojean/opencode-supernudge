@@ -90,18 +90,17 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 
 ### Prompt path resolution
 
-Prompt file paths in the `prompts` array support three resolution modes:
+Prompt file paths in the `prompts` array support 3 modes:
 
-1. **Home directory** - paths starting with `~` or containing `$HOME` are resolved against the user's home directory:
-   ```jsonc
+1. **Home directory** - paths starting with `~` or containing `$HOME`:
+```jsonc
    { "prompts": ["~/prompts/tdd.md", "$HOME/prompts/no-mocking.md"] }
    ```
 
-2. **Relative paths** - paths that are not absolute (don't start with `/`, `~`, or `$HOME`) are resolved against opencode's working directory (the project directory opencode was launched in):
+2. **Relative paths** - resolved against opencode's __working directory__:
    ```jsonc
    { "prompts": ["./prompts/tdd.md", "prompts/no-mocking.md", "../shared/constraints.md"] }
    ```
-   Both `./prompts/...` and bare `prompts/...` work. `../` is also supported to reach files in parent directories.
 
 3. **Absolute paths** - paths starting with `/` are used as-is:
    ```jsonc
