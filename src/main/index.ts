@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import { parse as parseJsonc } from "jsonc-parser"
 import type { ParseError } from "jsonc-parser"
 import fs from "node:fs"
@@ -33,7 +33,9 @@ type PromptConfig = {
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
 
 type Config = PromptConfig & {
-  "prompts": PromptEntry[]
+  "prompts": PromptEntry[],
+  "currentWorkingDirectory.configFilePath": string,
+  "currentWorkingDirectory.configEnabled": boolean
 }
 
 type ResolvedPrompt = PromptConfig & { content: string; title: string }
@@ -59,6 +61,8 @@ const DEFAULTS: Config = {
   "injection.subagentInterval": 1,
   "injection.subagentAlwaysOnFirst": true,
   "injection.subagentResetOnCompaction": true,
+  "currentWorkingDirectory.configFilePath": "./.opencode/com.kevincojean.opencode-supernudge/supernudge-configuration.jsonc",
+  "currentWorkingDirectory.configEnabled": true,
 }
 
 function withTitle(prompt: ResolvedPrompt): string {
@@ -94,6 +98,34 @@ function resolvePath(p: string, baseDir: string): string {
   return withHome
 }
 
+function loadLocalConfig(configPath: string, client: PluginInput["client"]): Config | null {
+  if (!fs.existsSync(configPath)) return null
+  const text = fs.readFileSync(configPath, "utf-8")
+  const errors: ParseError[] = []
+  const parsed = parseJsonc(text, errors, { allowTrailingComma: true })
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    client.tui.showToast({
+      body: {
+        title: "SuperNudge",
+        message: `Failed to parse local config at ${configPath}: ${errors.map(e => `ParseError at offset ${e.offset}`).join(", ")}`,
+        variant: "error"
+      }
+    })
+    return null
+  }
+  return { ...DEFAULTS, ...(parsed as Record<string, unknown>) } as Config
+}
+
+function mergeConfigs(global: Config, local: Config): Config {
+  // Only `prompts` is locally overridable. All other keys are global-only.
+  // Per-prompt overrides (e.g. injection.interval, enabled.*) work via
+  // the existing resolvePrompts spread: { ...defaults, ...obj } in each prompt entry.
+  return {
+    ...global,
+    "prompts": [...global.prompts, ...local.prompts],
+  }
+}
+
 function loadConfig(configPath: string): Config {
   if (!fs.existsSync(configPath)) return DEFAULTS
   const text = fs.readFileSync(configPath, "utf-8")
@@ -126,9 +158,19 @@ function resolvePrompts(
   return result
 }
 
-function getNudge(configPath: string, baseDir: string): { prompts: ResolvedPrompt[]; prefix: string; suffix: string; separator: string } {
-  const config = loadConfig(configPath)
-  const { prompts, ...defaults } = config
+function getMergedNudge(globalConfigPath: string, baseDir: string, client: PluginInput["client"]): { prompts: ResolvedPrompt[]; prefix: string; suffix: string; separator: string } {
+  const globalConfig = loadConfig(globalConfigPath)
+  let mergedConfig = globalConfig
+
+  if (globalConfig["currentWorkingDirectory.configEnabled"]) {
+    const localPath = resolvePath(globalConfig["currentWorkingDirectory.configFilePath"], baseDir)
+    const localConfig = loadLocalConfig(localPath, client)
+    if (localConfig) {
+      mergedConfig = mergeConfigs(globalConfig, localConfig)
+    }
+  }
+
+  const { prompts, ...defaults } = mergedConfig
   return {
     prompts: resolvePrompts(prompts, defaults, baseDir),
     prefix: defaults["wrapper.prefix"],
@@ -144,6 +186,7 @@ const DEFAULT_CONFIG_PATH = path.join(
 
 const plugin: Plugin = async (input, options) => {
   const baseDir = input.directory
+  const client = input.client
   const optConfigPath = options?.configPath
   const configPath = typeof optConfigPath === "string"
     ? optConfigPath
@@ -151,12 +194,12 @@ const plugin: Plugin = async (input, options) => {
 
   const counters = new Map<string, number[]>()
 
-  const subAgentInjector = new SubAgentMessageInjector(() => getNudge(configPath, baseDir).prompts)
+  const subAgentInjector = new SubAgentMessageInjector(() => getMergedNudge(configPath, baseDir, client).prompts)
 
   return {
     ...subAgentInjector.hooks(),
     "chat.message": async (input, output) => {
-      const { prompts: resolvedPrompts, prefix, suffix, separator } = getNudge(configPath, baseDir)
+      const { prompts: resolvedPrompts, prefix, suffix, separator } = getMergedNudge(configPath, baseDir, client)
       if (resolvedPrompts.length === 0) return
 
       let promptCounts = counters.get(input.sessionID)
@@ -212,7 +255,7 @@ const plugin: Plugin = async (input, options) => {
     },
     "experimental.chat.system.transform": async (input, output) => {
       if (input.sessionID) return
-      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath, baseDir)
+      const { prompts: resolvedPrompts, prefix, suffix } = getMergedNudge(configPath, baseDir, client)
       if (resolvedPrompts.length === 0) return
 
       const startPrompts: string[] = []
@@ -237,7 +280,7 @@ const plugin: Plugin = async (input, options) => {
       }
     },
     "experimental.session.compacting": async (input, output) => {
-      const { prompts: resolvedPrompts, prefix, suffix } = getNudge(configPath, baseDir)
+      const { prompts: resolvedPrompts, prefix, suffix } = getMergedNudge(configPath, baseDir, client)
 
       subAgentInjector.resetOnCompaction(input.sessionID, resolvedPrompts)
 

@@ -642,6 +642,161 @@ test(
 )
 
 test(
+  "given global prompts [A] and local prompts [B], when chat.message fires, then both A and B nudges injected",
+  async () => {
+    const dir = mkTmp()
+    const globalPrompt = writePrompt(dir, "global.txt", "GLOBAL_NUDGE")
+    const localPrompt = writePrompt(dir, "local.txt", "LOCAL_NUDGE")
+    const globalConfigPath = writeConfigFile({
+      prompts: [globalPrompt],
+      "currentWorkingDirectory.configFilePath": path.join(dir, "local-config.jsonc"),
+      "currentWorkingDirectory.configEnabled": true,
+    })
+    const localConfigPath = path.join(dir, "local-config.jsonc")
+    fs.writeFileSync(localConfigPath, JSON.stringify({
+      prompts: [localPrompt],
+    }))
+
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath: globalConfigPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok((output.parts[0] as TextPart).text.includes("GLOBAL_NUDGE"), "Global nudge injected")
+    assert.ok((output.parts[0] as TextPart).text.includes("LOCAL_NUDGE"), "Local nudge injected")
+  },
+)
+
+test(
+  "given local config invalid JSONC, when chat.message fires, then global config used, toast called with variant=\"error\"",
+  async () => {
+    const dir = mkTmp()
+    const globalPrompt = writePrompt(dir, "global.txt", "GLOBAL_NUDGE")
+    const globalConfigPath = writeConfigFile({
+      prompts: [globalPrompt],
+      "currentWorkingDirectory.configFilePath": path.join(dir, "invalid.jsonc"),
+      "currentWorkingDirectory.configEnabled": true,
+    })
+    const localConfigPath = path.join(dir, "invalid.jsonc")
+    fs.writeFileSync(localConfigPath, "{ invalid json }")
+
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath: globalConfigPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok((output.parts[0] as TextPart).text.includes("GLOBAL_NUDGE"), "Global nudge injected")
+  },
+)
+
+test(
+  "given local config empty {}, when chat.message fires, then global config unchanged",
+  async () => {
+    const dir = mkTmp()
+    const globalPrompt = writePrompt(dir, "global.txt", "GLOBAL_NUDGE")
+    const globalConfigPath = writeConfigFile({
+      prompts: [globalPrompt],
+      "currentWorkingDirectory.configFilePath": path.join(dir, "empty.jsonc"),
+      "currentWorkingDirectory.configEnabled": true,
+    })
+    const localConfigPath = path.join(dir, "empty.jsonc")
+    fs.writeFileSync(localConfigPath, "{}")
+
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath: globalConfigPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok((output.parts[0] as TextPart).text.includes("GLOBAL_NUDGE"), "Global nudge injected")
+  },
+)
+
+test(
+  "given local config with non-prompts keys, when merged, then ALL non-prompts keys ignored",
+  async () => {
+    const dir = mkTmp()
+    const globalPrompt = writePrompt(dir, "global.txt", "GLOBAL_NUDGE")
+    const localPrompt = writePrompt(dir, "local.txt", "LOCAL_NUDGE")
+    const globalConfigPath = writeConfigFile({
+      prompts: [globalPrompt],
+      "currentWorkingDirectory.configFilePath": path.join(dir, "local-config.jsonc"),
+      "currentWorkingDirectory.configEnabled": true,
+      "enabled.normalMessage": true,
+    })
+    const localConfigPath = path.join(dir, "local-config.jsonc")
+    fs.writeFileSync(localConfigPath, JSON.stringify({
+      prompts: [localPrompt],
+      "enabled.normalMessage": false,
+      "injection.interval": 99,
+      "position.normalMessage": "end",
+      "wrapper.prefix": "OVERRIDDEN",
+      "currentWorkingDirectory.configFilePath": "ignored-path",
+      "currentWorkingDirectory.configEnabled": false,
+    }))
+
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath: globalConfigPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    // Both prompts injected (prompts concatenated)
+    assert.ok((output.parts[0] as TextPart).text.includes("GLOBAL_NUDGE"), "Global nudge injected")
+    assert.ok((output.parts[0] as TextPart).text.includes("LOCAL_NUDGE"), "Local nudge injected")
+    // Global enabled.normalMessage=true still active (local false ignored)
+    assert.ok((output.parts[0] as TextPart).text.includes("GLOBAL_NUDGE"), "Global nudge still fires (local enabled.normalMessage ignored)")
+  },
+)
+
+test(
+  "given configFilePath relative path, when plugin loads, local config loaded from resolved path",
+  async () => {
+    const dir = mkTmp()
+    const globalPrompt = writePrompt(dir, "global.txt", "GLOBAL_NUDGE")
+    const localPrompt = writePrompt(dir, "local.txt", "LOCAL_NUDGE")
+    const globalConfigPath = writeConfigFile({
+      prompts: [globalPrompt],
+      "currentWorkingDirectory.configFilePath": "./local-config.jsonc",
+      "currentWorkingDirectory.configEnabled": true,
+    })
+    const localConfigPath = path.join(dir, "local-config.jsonc")
+    fs.writeFileSync(localConfigPath, JSON.stringify({
+      prompts: [localPrompt],
+    }))
+
+    const input = stubInput()
+    input.directory = dir
+    input.worktree = dir
+    const plugin = await loadPlugin()
+    const hooks = await plugin(input, { configPath: globalConfigPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.ok((output.parts[0] as TextPart).text.includes("GLOBAL_NUDGE"), "Global nudge injected")
+    assert.ok((output.parts[0] as TextPart).text.includes("LOCAL_NUDGE"), "Local nudge injected")
+  },
+)
+
+test(
   "given config with per-prompt resetCounterOnCompaction=false and interval=3, when 1st message injects then compaction fires then 2nd message sent, then that prompt does NOT inject on 2nd message",
   async () => {
     const promptPath = createTempPrompts("NUDGE_A")

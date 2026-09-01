@@ -90,6 +90,33 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
 
 ### Prompt path resolution
 
+### Project-local config
+
+A project-local config file can overlay the global config. Two global config keys control this:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `currentWorkingDirectory.configFilePath` | string | `"./.opencode/com.kevincojean.opencode-supernudge/supernudge-configuration.jsonc"` | Path to local config (relative to opencode cwd) |
+| `currentWorkingDirectory.configEnabled` | boolean | `true` | Master switch for local config lookup |
+
+When enabled, the plugin looks for a local config file at the resolved path. If found and valid, the local config's `prompts` array is **concatenated** with the global config's `prompts` array. All other keys in the local config are **ignored** - only `prompts` is locally overridable. Per-prompt overrides (e.g. `injection.interval`, `enabled.*`) work within local config's `prompts` entries via the [per-prompt override](#per-prompt-override) mechanism.
+
+If the local config has parse errors, a toast notification (error level) is shown and the plugin falls back to the global config only.
+
+Example local config:
+```jsonc
+{
+  "prompts": [
+    "./prompts/project-specific-nudge.md",
+    {
+      "path": "./prompts/tdd.md",
+      "injection.interval": 3,
+      "enabled.compaction": false
+    }
+  ]
+}
+```
+
 Prompt file paths in the `prompts` array support 3 modes:
 
 1. **Home directory** - paths starting with `~` or containing `$HOME`:
@@ -179,6 +206,7 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `position.compaction` | `"start"` \| `"end"` | `"start"` | Nudge placement in compaction context. |
 | `enabled.normalMessage` | `boolean` | `true` | Inject nudge on user messages. |
 | `enabled.subagentSystemPromptNudge` | `boolean` | `true` | Inject nudge into subagent's **initial system prompt** (via `experimental.chat.system.transform`). Fires once per subagent session. |
+| `enabled.subagentAutonomousWorkNudge` | `boolean` | `true` | Inject nudge **periodically** during subagent autonomous turns (via `experimental.text.complete` + `experimental.chat.messages.transform`). Does NOT fire on the primary agent's `chat.message`. |
 | `enabled.subagentAutonomousWorkNudge` | `boolean` | `true` | Inject nudge **periodically** during subagent autonomous turns (via `experimental.text.complete` + `experimental.chat.messages.transform`). Does NOT fire on the primary agent's `chat.message`. |
 | `enabled.compaction` | `boolean` | `true` | Inject nudge into context on compaction. |
 | `wrapper.prefix` | `string` | `"<opencode-supernudge>"` | Marker inserted above each nudge block. Empty string disables. |

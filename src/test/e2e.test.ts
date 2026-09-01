@@ -10,21 +10,28 @@ import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 const NUDGE = "E2E_NUDGE_MARKER"
 
 type SuperNudgeConfig = {
-  prompts?: (string | { path: string } & Record<string, unknown>)[]
-  "injection.interval"?: number
-  "injection.alwaysOnFirstMessage"?: boolean
-  "injection.resetCounterOnCompaction"?: boolean
-  "position.normalMessage"?: string
-  "position.subagent"?: string
-  "position.compaction"?: string
-  "enabled.normalMessage"?: boolean
-  "enabled.subagentSystemPromptNudge"?: boolean
-  "enabled.subagentAutonomousWorkNudge"?: boolean
-  "enabled.compaction"?: boolean
-  "injection.skipFirstMessageBelowChars"?: number
-  "injection.subagentInterval"?: number
-  "injection.subagentAlwaysOnFirst"?: boolean
-  "injection.subagentResetOnCompaction"?: boolean
+  prompts?: (string | { path: string } & Record<string, unknown>)[],
+  "injection.interval"?: number,
+  "injection.alwaysOnFirstMessage"?: boolean,
+  "injection.resetCounterOnCompaction"?: boolean,
+  "position.normalMessage"?: string,
+  "position.subagent"?: string,
+  "position.compaction"?: string,
+  "enabled.normalMessage"?: boolean,
+  "enabled.subagentSystemPromptNudge"?: boolean,
+  "enabled.subagentAutonomousWorkNudge"?: boolean,
+  "enabled.compaction"?: boolean,
+  "injection.skipFirstMessageBelowChars"?: number,
+  "injection.subagentInterval"?: number,
+  "injection.subagentAlwaysOnFirst"?: boolean,
+  "injection.subagentResetOnCompaction"?: boolean,
+  "wrapper.prefix"?: string,
+  "wrapper.suffix"?: string,
+  "nudge.separator"?: string,
+  "nudge.enableTitlePrefix"?: boolean,
+  "nudge.trim"?: boolean,
+  "currentWorkingDirectory.configFilePath"?: string,
+  "currentWorkingDirectory.configEnabled"?: boolean,
 }
 
 const projectDir = process.cwd()
@@ -127,6 +134,13 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "injection.subagentResetOnCompaction": config["injection.subagentResetOnCompaction"] ?? false,
     "enabled.compaction": config["enabled.compaction"] ?? true,
     "injection.skipFirstMessageBelowChars": config["injection.skipFirstMessageBelowChars"] ?? 3,
+    "wrapper.prefix": config["wrapper.prefix"] ?? "<opencode-supernudge>",
+    "wrapper.suffix": config["wrapper.suffix"] ?? "</opencode-supernudge>",
+    "nudge.separator": config["nudge.separator"] ?? "\n\n",
+    "nudge.enableTitlePrefix": config["nudge.enableTitlePrefix"] ?? true,
+    "nudge.trim": config["nudge.trim"] ?? true,
+    "currentWorkingDirectory.configFilePath": config["currentWorkingDirectory.configFilePath"] ?? path.join(supernudgeDir, "supernudge-configuration.jsonc"),
+    "currentWorkingDirectory.configEnabled": config["currentWorkingDirectory.configEnabled"] ?? true,
   }
   fs.writeFileSync(
     path.join(supernudgeDir, "supernudge-configuration.jsonc"),
@@ -481,5 +495,19 @@ describe("e2e: SuperNudge acceptance criteria", () => {
 
     const longText = await sendMessage("hello world this is a long enough message to pass the threshold")
     assert.ok(longText.includes(NUDGE), `long msg must have nudge. Got: ${longText}`)
+  })
+
+  test("AC15: given global config with global prompt and local config at ./.opencode/com.kevincojean.opencode-supernudge/supernudge-configuration.jsonc with local prompt, when chat.message fires, then message contains BOTH nudges (concatenate)", async () => {
+    const globalPromptPath = path.join(tmpHome, "global-prompt.md")
+    fs.writeFileSync(globalPromptPath, "NUDGE_GLOBAL")
+    const localPromptPath = path.join(tmpHome, "local-prompt.md")
+    fs.writeFileSync(localPromptPath, "NUDGE_LOCAL")
+    const localConfigPath = path.join(projectDir, ".opencode", "com.kevincojean.opencode-supernudge", "supernudge-configuration.jsonc")
+    fs.mkdirSync(path.dirname(localConfigPath), { recursive: true })
+    fs.writeFileSync(localConfigPath, JSON.stringify({ prompts: [localPromptPath] }))
+    writeNudgeConfig({ prompts: [globalPromptPath] })
+    const text = await sendMessage("hello")
+    assert.ok(text.includes("NUDGE_GLOBAL"), `global nudge must be present. Got: ${text}`)
+    assert.ok(text.includes("NUDGE_LOCAL"), `local nudge must be present. Got: ${text}`)
   })
 })
