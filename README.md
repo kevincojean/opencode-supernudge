@@ -138,9 +138,9 @@ Example local config:
 ```jsonc
 {
   "prompts": [
-    "./prompts/project-specific-nudge.md",
+    ".opencode/com.kevincojean.opencode-supernudge/project-specific-nudge.md",
     {
-      "path": "./prompts/tdd.md",
+      "path": ".opencode/com.kevincojean.opencode-supernudge/project-specific-nudge.md/tdd.md",
       "injection.interval": 3,
       "enabled.compaction": false
     }
