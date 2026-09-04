@@ -47,6 +47,19 @@ Do NOT add test docstrings, or comments, or module docstrings unless ABSOLUTELY 
 Do NOT use the question tool at you disposal, it is extremely slow.
 ```
 
+### Skipping injections in system contexts
+
+You may chose for nudges to not fire using regexes. 
+For instance, the oh-my-openagent plugin injects prompts when sub-agents finish a task, and it's wasteful to inject in those messages. 
+Use `injection.skipOnRegexMatch` to suppress nudges when text contains markers:
+
+```jsonc
+{
+  "injection.skipOnRegexMatch": [
+    "<\\/?system-reminder>"
+  ]
+}
+```
 
 ## Install
 ```bash
@@ -255,6 +268,7 @@ Any prompt entry can be an object that overrides specific global settings for th
 | `nudge.separator` | `string` | `"\n\n"` | Separator between multiple nudges within the same block. |
 | `nudge.enableTitlePrefix` | `boolean` | `true` | Prefix each nudge with `[filename]` (lowercase, no extension). |
 | `injection.skipFirstMessageBelowChars` | `number` | `3` | Skip injection when user message length `<=` this threshold. |
+| `injection.skipOnRegexMatch` | `string[]` | `[]` | Skip injection if message text matches any regex. |
 | `injection.subagentInterval` | `number` | `1` | Inject every Nth autonomous turn. `1` = every turn. `2` = 1st, skip 2nd, inject 3rd. |
 | `injection.subagentAlwaysOnFirst` | `boolean` | `true` | Force inject on first autonomous turn regardless of interval. |
 | `injection.subagentResetOnCompaction` | `boolean` | `true` | Reset autonomous counter to 0 when compaction fires. |
