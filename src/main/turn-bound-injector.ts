@@ -19,6 +19,7 @@ export type ResolvedAutonomousPrompt = {
   "injection.subagentAlwaysOnFirst": boolean
   "injection.subagentResetOnCompaction": boolean
   "position.subagent": "start" | "end"
+  "injection.skipOnRegexMatch": string[]
   content: string
   title: string
 }

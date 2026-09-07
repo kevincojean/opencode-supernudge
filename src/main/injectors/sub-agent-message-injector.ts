@@ -1,5 +1,6 @@
-import type { Hooks } from "@opencode-ai/plugin"
+import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { ResolvedAutonomousPrompt, TurnBoundMessageInjector, PromptContext, InjectResult } from "../turn-bound-injector.ts"
+import { shouldSkipOnRegex } from "./regex-skip.ts"
 
 type TextPartTarget = { type: "text"; text: string }
 
@@ -13,9 +14,14 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
   private counters = new Map<string, number[]>()
   private primarySessions = new Set<string>()
   private resolvePrompts: () => ResolvedAutonomousPrompt[]
+  private client: PluginInput["client"] | undefined
 
-  constructor(resolvePrompts: () => ResolvedAutonomousPrompt[]) {
+  constructor(
+    resolvePrompts: () => ResolvedAutonomousPrompt[],
+    client?: PluginInput["client"],
+  ) {
     this.resolvePrompts = resolvePrompts
+    this.client = client
   }
 
   incrementTurnCount(sessionID: string, promptIndex: number): number {
@@ -105,9 +111,13 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
         const sessionID = (lastMessage.info as { sessionID?: string }).sessionID
         if (!sessionID) return
         if (this.primarySessions.has(sessionID)) return
+        const lastPartText = (lastPart as { text: string }).text
         for (let i = 0; i < prompts.length; i++) {
           const prompt = prompts[i]
           if (!prompt["enabled.subagentAutonomousWorkNudge"]) continue
+
+          if (shouldSkipOnRegex(lastPartText, prompt["injection.skipOnRegexMatch"], this.client)) continue
+
           this.inject(sessionID, i, this.ctxFor(prompt, i), lastPart)
         }
       },

@@ -1813,3 +1813,224 @@ test(
   },
 )
 
+test(
+  "given injection.skipOnRegexMatch with pattern matching system-reminder, when user message contains <system-reminder>, then no nudge injected",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "injection.skipOnRegexMatch": ["<system-reminder>"],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const chatMessage = hooks["chat.message"]!
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("<system-reminder>some injected content</system-reminder>\n\nhello")],
+    }
+
+    await chatMessage(
+      { message: output.message, parts: output.parts } as unknown as Parameters<typeof chatMessage>[0],
+      output as unknown as Parameters<typeof chatMessage>[1],
+    )
+
+    const textPart = output.parts.find(p => p.type === "text") as TextPart
+    assert.ok(
+      !textPart.text.includes("NUDGE"),
+      `message containing <system-reminder> must skip injection, got: ${textPart.text}`,
+    )
+  },
+)
+
+test(
+  "given injection.skipOnRegexMatch with pattern matching system-reminder, when system.transform fires with system prompt containing <system-reminder>, then no nudge injected",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "enabled.normalMessage": false,
+      "injection.skipOnRegexMatch": ["<system-reminder>"],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const systemTransform = hooks["experimental.chat.system.transform"]!
+    const output = {
+      system: ["<system-reminder>injected content</system-reminder>", "existing system prompt"],
+    }
+
+    await systemTransform(
+      {} as unknown as Parameters<typeof systemTransform>[0],
+      output as unknown as Parameters<typeof systemTransform>[1],
+    )
+
+    const systemText = output.system.join("\n")
+    assert.ok(
+      !systemText.includes("NUDGE"),
+      `system prompt containing <system-reminder> must skip injection, got: ${systemText}`,
+    )
+  },
+)
+
+test(
+  "given injection.skipOnRegexMatch with pattern matching system-reminder, when messages.transform fires with last message containing <system-reminder>, then no autonomous nudge injected",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "enabled.normalMessage": false,
+      "enabled.subagentSystemPromptNudge": false,
+      "injection.skipOnRegexMatch": ["<system-reminder>"],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const textComplete = hooks["experimental.text.complete"]!
+    const messagesTransform = hooks["experimental.chat.messages.transform"]!
+
+    await textComplete(
+      { sessionID: "subagent-1", messageID: "m0", partID: "p0" },
+      { text: "assistant-0" },
+    )
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "subagent-1", id: "info1", role: "assistant" },
+          parts: [{ type: "text", text: "<system-reminder>injected</system-reminder>\n\nprevious message" }],
+        },
+      ],
+    }
+    await messagesTransform({}, transformOut as unknown as Parameters<typeof messagesTransform>[1])
+
+    const lastPart = transformOut.messages[transformOut.messages.length - 1].parts[0]
+    assert.ok(
+      !(lastPart as { text: string }).text.includes("NUDGE"),
+      `last message containing <system-reminder> must skip autonomous injection, got: ${(lastPart as { text: string }).text}`,
+    )
+  },
+)
+
+test(
+  "given injection.skipOnRegexMatch with pattern matching system-reminder, when session.compacting fires with context containing <system-reminder>, then no nudge injected",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "enabled.normalMessage": false,
+      "enabled.subagentSystemPromptNudge": false,
+      "enabled.subagentAutonomousWorkNudge": false,
+      "injection.skipOnRegexMatch": ["<system-reminder>"],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const sessionCompacting = hooks["experimental.session.compacting"]!
+    const output = {
+      context: ["<system-reminder>injected content</system-reminder>", "existing context"],
+    }
+
+    await sessionCompacting(
+      { sessionID: "s1" } as unknown as Parameters<typeof sessionCompacting>[0],
+      output as unknown as Parameters<typeof sessionCompacting>[1],
+    )
+
+    const contextText = output.context.join("\n")
+    assert.ok(
+      !contextText.includes("NUDGE"),
+      `context containing <system-reminder> must skip injection, got: ${contextText}`,
+    )
+  },
+)
+
+test(
+  "given two prompts where only one has injection.skipOnRegexMatch, when message matches pattern, then only that prompt skips injection",
+  async () => {
+    const promptPath1 = createTempPrompts("NUDGE1")
+    const promptPath2 = createTempPrompts("NUDGE2")
+    const configPath = writeConfigFile({
+      prompts: [
+        { path: promptPath1, "injection.skipOnRegexMatch": ["<system-reminder>"] },
+        promptPath2,
+      ],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const chatMessage = hooks["chat.message"]!
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("<system-reminder>injected</system-reminder>\n\nhello")],
+    }
+
+    await chatMessage(
+      { message: output.message, parts: output.parts } as unknown as Parameters<typeof chatMessage>[0],
+      output as unknown as Parameters<typeof chatMessage>[1],
+    )
+
+    const textPart = output.parts.find(p => p.type === "text") as TextPart
+    assert.ok(
+      !textPart.text.includes("NUDGE1"),
+      `prompt with skipOnRegexMatch must skip injection, got: ${textPart.text}`,
+    )
+    assert.ok(
+      textPart.text.includes("NUDGE2"),
+      `prompt without skipOnRegexMatch must still inject, got: ${textPart.text}`,
+    )
+  },
+)
+
+test(
+  "given injection.skipOnRegexMatch with invalid regex pattern, when chat.message fires, then toast error shown and pattern skipped",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "injection.skipOnRegexMatch": ["[invalid(regex"],
+    })
+    
+    const toastCalls: Array<{ title: string; message: string; variant: string }> = []
+    const mockClient = {
+      tui: {
+        showToast: (params: { body: { title: string; message: string; variant: string } }) => {
+          toastCalls.push(params.body)
+        },
+      },
+    } as unknown as PluginInput["client"]
+    
+    const plugin = await loadPlugin()
+    const hooks = await plugin({ ...stubInput(), client: mockClient }, { configPath })
+
+    const chatMessage = hooks["chat.message"]!
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+
+    await chatMessage(
+      { message: output.message, parts: output.parts } as unknown as Parameters<typeof chatMessage>[0],
+      output as unknown as Parameters<typeof chatMessage>[1],
+    )
+
+    assert.ok(
+      toastCalls.length > 0,
+      `invalid regex must trigger toast error, got ${toastCalls.length} toasts`,
+    )
+    assert.ok(
+      toastCalls.some(t => t.message.includes("[invalid(regex")),
+      `toast message must mention the invalid pattern, got: ${JSON.stringify(toastCalls)}`,
+    )
+    assert.ok(
+      toastCalls.some(t => t.variant === "error"),
+      `toast must be error variant, got: ${JSON.stringify(toastCalls)}`,
+    )
+    
+    const textPart = output.parts.find(p => p.type === "text") as TextPart
+    assert.ok(
+      textPart.text.includes("NUDGE"),
+      `injection must still happen after invalid regex, got: ${textPart.text}`,
+    )
+  },
+)
+

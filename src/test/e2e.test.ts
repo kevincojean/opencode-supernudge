@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import http from "node:http"
-import { spawn, execSync, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 
 const NUDGE = "E2E_NUDGE_MARKER"
@@ -25,6 +25,7 @@ type SuperNudgeConfig = {
   "injection.subagentInterval"?: number,
   "injection.subagentAlwaysOnFirst"?: boolean,
   "injection.subagentResetOnCompaction"?: boolean,
+  "injection.skipOnRegexMatch"?: string[],
   "wrapper.prefix"?: string,
   "wrapper.suffix"?: string,
   "nudge.separator"?: string,
@@ -35,7 +36,30 @@ type SuperNudgeConfig = {
 }
 
 const projectDir = process.cwd()
-let portCounter = 30000
+
+// Not mkdtemp: opencode installs ~62MB of plugin deps into a fresh HOME on every boot.
+const e2eHome = path.join(os.tmpdir(), "sn-e2e-home")
+
+function resetE2eHome(): string {
+  const configDir = path.join(e2eHome, ".config", "opencode")
+  fs.mkdirSync(configDir, { recursive: true })
+
+  const volatilePaths = [
+    path.join(configDir, "opencode.jsonc"),
+    path.join(configDir, "opencode-supernudge"),
+    path.join(e2eHome, ".local", "share", "opencode"),
+    path.join(e2eHome, ".local", "state", "opencode"),
+    path.join(e2eHome, "prompts"),
+    path.join(e2eHome, "nudge.txt"),
+    path.join(e2eHome, "nonexistent.txt"),
+  ]
+  for (const target of volatilePaths) {
+    fs.rmSync(target, { recursive: true, force: true })
+  }
+
+  return e2eHome
+}
+
 let tmpHome: string
 let supernudgeDir: string
 let promptFile: string
@@ -57,22 +81,25 @@ function killServer() {
   }, 500)
 }
 
-function killOrphanedOpencode() {
-  try { execSync('pkill -9 -f "opencode serve"', { stdio: "ignore" }) } catch {}
-  try { execSync('pkill -9 -f "opencode.*serve"', { stdio: "ignore" }) } catch {}
-  try { execSync('fuser -k 30000/tcp 30001/tcp 30002/tcp 30003/tcp 30004/tcp 30005/tcp', { stdio: "ignore" }) } catch {}
-}
-
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(sig, () => {
     killServer()
-    killOrphanedOpencode()
     process.exit(130)
   })
 }
 process.on("exit", killServer)
 
-function startStubServer(port: number): Promise<http.Server> {
+const STUB_REPLY = "stub response"
+
+function streamChunks() {
+  const base = { id: "stub-completion", object: "chat.completion.chunk", created: 0, model: "stub" }
+  return [
+    { ...base, choices: [{ index: 0, delta: { role: "assistant", content: STUB_REPLY }, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } },
+  ]
+}
+
+function startStubServer(): Promise<{ server: http.Server; port: number }> {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       if (req.method === "GET" && req.url === "/v1/models") {
@@ -91,6 +118,22 @@ function startStubServer(port: number): Promise<http.Server> {
         let body = ""
         req.on("data", (chunk) => { body += chunk.toString() })
         req.on("end", () => {
+          let streaming = false
+          try { streaming = JSON.parse(body).stream === true } catch {}
+
+          if (streaming) {
+            res.writeHead(200, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            })
+            for (const chunk of streamChunks()) {
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+            }
+            res.end("data: [DONE]\n\n")
+            return
+          }
+
           res.writeHead(200, { "Content-Type": "application/json" })
           res.end(JSON.stringify({
             id: "stub-completion",
@@ -99,7 +142,7 @@ function startStubServer(port: number): Promise<http.Server> {
             model: "stub",
             choices: [{
               index: 0,
-              message: { role: "assistant", content: "stub response" },
+              message: { role: "assistant", content: STUB_REPLY },
               finish_reason: "stop",
             }],
             usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
@@ -113,7 +156,14 @@ function startStubServer(port: number): Promise<http.Server> {
     })
 
     server.on("error", reject)
-    server.listen(port, "127.0.0.1", () => resolve(server))
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address()
+      if (!addr || typeof addr === "string") {
+        reject(new Error("Failed to get stub server address"))
+        return
+      }
+      resolve({ server, port: addr.port })
+    })
   })
 }
 
@@ -134,6 +184,7 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "injection.subagentResetOnCompaction": config["injection.subagentResetOnCompaction"] ?? false,
     "enabled.compaction": config["enabled.compaction"] ?? true,
     "injection.skipFirstMessageBelowChars": config["injection.skipFirstMessageBelowChars"] ?? 3,
+    "injection.skipOnRegexMatch": config["injection.skipOnRegexMatch"] ?? [],
     "wrapper.prefix": config["wrapper.prefix"] ?? "<opencode-supernudge>",
     "wrapper.suffix": config["wrapper.suffix"] ?? "</opencode-supernudge>",
     "nudge.separator": config["nudge.separator"] ?? "\n\n",
@@ -185,7 +236,7 @@ function spawnServer(homeDir: string, port: number): Promise<{ url: string; proc
       try { p.kill("SIGKILL") } catch {}
       if (p.pid) { try { process.kill(-p.pid, "SIGKILL") } catch {} }
       reject(new Error(`Server timeout. Output: ${output}`))
-    }, 15000)
+    }, 30000)
 
     p.stdout?.on("data", (chunk) => {
       output += chunk.toString()
@@ -298,11 +349,11 @@ async function sendThenCompactThenSend(msg1: string, msg2: string): Promise<{ fi
 
 describe("e2e: SuperNudge acceptance criteria", () => {
   before(async () => {
-    killOrphanedOpencode()
-    const stubPort = 31000
-    stubServer = await startStubServer(stubPort)
+    const { server: stub, port: stubPort } = await startStubServer()
+    stubServer = stub
+    const testPort = 40000 + Math.floor(Math.random() * 10000)
 
-    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "sn-e2e-"))
+    tmpHome = resetE2eHome()
     const configDir = path.join(tmpHome, ".config", "opencode")
     supernudgeDir = path.join(configDir, "opencode-supernudge")
     fs.mkdirSync(supernudgeDir, { recursive: true })
@@ -330,19 +381,19 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     )
 
     writeNudgeConfig({})
-    const { url, proc: p } = await spawnServer(tmpHome, portCounter++)
+    const { url, proc: p } = await spawnServer(tmpHome, testPort)
     proc = p
     client = createOpencodeClient({ baseUrl: url })
-  })
+    await sendMessage("warm-up")
+  }, { timeout: 90000 })
 
   after(() => {
     killServer()
-    killOrphanedOpencode()
     stubServer.close()
     setTimeout(() => process.exit(0), 1000)
   })
 
-  test("AC1: given interval=2 and alwaysOnFirst=true, when 3 messages sent, then 1st has nudge, 2nd no nudge, 3rd has nudge", async () => {
+  test("AC1: given interval=2 and alwaysOnFirst=true, when 3 messages sent, then 1st has nudge, 2nd no nudge, 3rd has nudge", { timeout: 120000 }, async () => {
     writeNudgeConfig({ "injection.interval": 2, "injection.alwaysOnFirstMessage": true })
     const texts = await sendMessages(["msg-1", "msg-2", "msg-3"])
 
@@ -495,5 +546,19 @@ describe("e2e: SuperNudge acceptance criteria", () => {
 
     const longText = await sendMessage("hello world this is a long enough message to pass the threshold")
     assert.ok(longText.includes(NUDGE), `long msg must have nudge. Got: ${longText}`)
+  })
+
+  test("AC14: given injection.skipOnRegexMatch with system-reminder pattern, when message contains <system-reminder>, then no nudge injected", async () => {
+    writeNudgeConfig({ "injection.skipOnRegexMatch": ["<system-reminder>"] })
+    const text = await sendMessage("<system-reminder>injected content</system-reminder>\n\nhello")
+
+    assert.ok(!text.includes(NUDGE), `message with <system-reminder> must skip injection. Got: ${text}`)
+  })
+
+  test("AC15: given injection.skipOnRegexMatch with system-reminder pattern, when message does NOT contain pattern, then nudge injected", async () => {
+    writeNudgeConfig({ "injection.skipOnRegexMatch": ["<system-reminder>"] })
+    const text = await sendMessage("hello world")
+
+    assert.ok(text.includes(NUDGE), `message without pattern must have nudge. Got: ${text}`)
   })
 })

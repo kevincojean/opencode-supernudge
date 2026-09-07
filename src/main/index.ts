@@ -5,6 +5,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { SubAgentMessageInjector } from "./injectors/sub-agent-message-injector.ts"
+import { shouldSkipOnRegex } from "./injectors/regex-skip.ts"
 
 type Position = "start" | "end"
 
@@ -28,6 +29,7 @@ type PromptConfig = {
   "injection.subagentInterval": number
   "injection.subagentAlwaysOnFirst": boolean
   "injection.subagentResetOnCompaction": boolean
+  "injection.skipOnRegexMatch": string[]
 }
 
 type PromptEntry = string | ({ path: string } & Partial<PromptConfig>)
@@ -61,6 +63,7 @@ const DEFAULTS: Config = {
   "injection.subagentInterval": 1,
   "injection.subagentAlwaysOnFirst": true,
   "injection.subagentResetOnCompaction": true,
+  "injection.skipOnRegexMatch": [],
   "currentWorkingDirectory.configFilePath": "./.opencode/com.kevincojean.opencode-supernudge/supernudge-configuration.jsonc",
   "currentWorkingDirectory.configEnabled": true,
 }
@@ -198,7 +201,7 @@ const plugin: Plugin = async (input, options) => {
 
   const counters = new Map<string, number[]>()
 
-  const subAgentInjector = new SubAgentMessageInjector(() => getMergedNudge(configPath, baseDir, client).prompts)
+  const subAgentInjector = new SubAgentMessageInjector(() => getMergedNudge(configPath, baseDir, client).prompts, client)
 
   return {
     ...subAgentInjector.hooks(),
@@ -236,6 +239,8 @@ const plugin: Plugin = async (input, options) => {
         if (!shouldInject) continue
         if (messageText.length <= skipThreshold(prompt)) continue
 
+        if (shouldSkipOnRegex(messageText, prompt["injection.skipOnRegexMatch"], client)) continue
+
         if (prompt["position.normalMessage"] === "end") {
           endTexts.push(withTitle(prompt))
         } else {
@@ -264,9 +269,13 @@ const plugin: Plugin = async (input, options) => {
 
       const startPrompts: string[] = []
       const endPrompts: string[] = []
+      const systemText = output.system.join("\n")
 
       for (const prompt of resolvedPrompts) {
         if (!prompt["enabled.subagentSystemPromptNudge"]) continue
+
+        if (shouldSkipOnRegex(systemText, prompt["injection.skipOnRegexMatch"], client)) continue
+
         if (prompt["position.subagent"] === "end") {
           endPrompts.push(withTitle(prompt))
         } else {
@@ -299,9 +308,13 @@ const plugin: Plugin = async (input, options) => {
 
       const startPrompts: string[] = []
       const endPrompts: string[] = []
+      const contextText = output.context.join("\n")
 
       for (const prompt of resolvedPrompts) {
         if (!prompt["enabled.compaction"]) continue
+
+        if (shouldSkipOnRegex(contextText, prompt["injection.skipOnRegexMatch"], client)) continue
+
         if (prompt["position.compaction"] === "end") {
           endPrompts.push(withTitle(prompt))
         } else {
