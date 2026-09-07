@@ -47,20 +47,6 @@ Do NOT add test docstrings, or comments, or module docstrings unless ABSOLUTELY 
 Do NOT use the question tool at you disposal, it is extremely slow.
 ```
 
-### Skipping injections in system contexts
-
-You may chose for nudges to not fire using regexes. 
-For instance, the oh-my-openagent plugin injects prompts when sub-agents finish a task, and it's wasteful to inject in those messages. 
-Use `injection.skipOnRegexMatch` to suppress nudges when text contains markers:
-
-```jsonc
-{
-  "injection.skipOnRegexMatch": [
-    "<\\/?system-reminder>"
-  ]
-}
-```
-
 ## Install
 ```bash
 git clone https://github.com/kevincojean/opencode-supernudge.git
@@ -247,6 +233,25 @@ Any prompt entry can be an object that overrides specific global settings for th
 - `no-mocking.md` - full override, all globals ignored, uses its own settings exclusively
 
 </details>
+
+<details>
+<summary><strong>Skipping injections in system contexts</strong></summary>
+
+### Skipping injections in system contexts
+
+You may chose for nudges to not fire using regexes. 
+For instance, the oh-my-openagent plugin injects prompts when sub-agents finish a task, and it's wasteful to inject in those messages. 
+Use `injection.skipOnRegexMatch` to suppress nudges when text contains markers:
+
+```jsonc
+{
+  "injection.skipOnRegexMatch": [
+    "<\\/?system-reminder>"
+  ]
+}
+```
+</details>
+
 
 ### Parameters
 | Key | Type | Default | Description |
