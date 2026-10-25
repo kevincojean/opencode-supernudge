@@ -66,3 +66,32 @@ Prompt paths in config only supported `~` and `$HOME` expansion. Relative paths 
 
 ### T-017: Regex-based injection skip
 Added `injection.skipOnRegexMatch: string[]` config key (default `[]`). When any regex pattern matches the text content at an injection point, that prompt's injection is skipped. Applies to all 4 injection paths: `chat.message`, `experimental.chat.system.transform`, `experimental.chat.messages.transform`, `experimental.session.compacting`. Per-prompt overridable. Invalid regex patterns trigger a toast error (variant: "error") and are silently skipped. Match happens AFTER other plugins inject (checks the already-modified text). 6 unit tests added covering: chat.message skip, system.transform skip, messages.transform skip, compaction skip, per-prompt override, invalid regex handling. 2 e2e tests added (AC14, AC15). `ResolvedAutonomousPrompt` type updated to include the new field.
+
+## 2026-10-25
+
+### T-019: The `chat.message` limitation for invisible nudges
+A `synthetic: true` part pushed from `chat.message` IS persisted but is STRIPPED from the prompt - the model never sees it. So `chat.message` can never deliver "model sees it, user does not". Only `experimental.chat.messages.transform` can. Verified against real opencode 1.18.27 with a stub LLM probe (`.omo/evidence/task-0-probe.txt`).
+
+### T-019: Transform parts are memory-only
+Parts inserted in `messages.transform` are never written to the `part` table and never returned by `session.messages()`. Consequence: no accumulation across turns, no stale-part cleanup, no dedupe logic needed. Each request gets exactly one fresh insertion.
+
+### T-019: Hook ordering guarantee
+`chat.message` runs before `messages.transform` in the same turn. Counters incremented in `chat.message` are safe to read from transform for that turn.
+
+### T-019: Counter ownership under `nudge.visible`
+The normalMessage counter is incremented ONLY in `chat.message`, and it increments even when `nudge.visible === false` (where delivery is skipped). The transform-side provider reads the counter and never increments. This keeps interval math identical across visibility modes.
+
+### T-019: `computeDue` extraction
+A single pure function drives both delivery paths so `injection.interval`, `injection.alwaysOnFirstMessage`, `injection.skipFirstMessageBelowChars` and `injection.skipOnRegexMatch` cannot diverge between visible and invisible mode.
+
+### T-019: `nudge.visibleMarker` semantics
+Means "suppress the wrapper", not "suppress the nudge". It wins over non-empty `wrapper.prefix`/`wrapper.suffix`. An empty wrapper string is a different feature and both must keep working.
+
+### T-019: Block-level wrapper application
+Both `chat.message` and the transform provider apply the wrapper ONCE per position group (start, end), not per prompt. Per-prompt wrapping broke multi-nudge tests which assert a single `<opencode-supernudge>` pair around several nudges.
+
+### T-019: Synthetic part id convention
+`prt_sn_${sessionID}_${partKey}`, deterministic. No id format is validated by the SDK; `prt_` is an internal convention only. `TextPart.synthetic` IS declared in `@opencode-ai/sdk`.
+
+### T-019: Invisible handler placement inside the injector hook
+The normalMessage invisible delivery lives INSIDE `SubAgentMessageInjector`'s single `experimental.chat.messages.transform` handler, reached via `setPrimaryInvisibleProvider`. A second hook key would be clobbered by the double `hooks()` spread in the plugin entry.
