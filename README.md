@@ -83,7 +83,9 @@ Create `~/.config/opencode/opencode-supernudge/supernudge-configuration.jsonc`:
   "enabled.subagentAutonomousWorkNudge": true,
   "enabled.compaction": true,
   "wrapper.prefix": "<opencode-supernudge>",
-  "wrapper.suffix": "</opencode-supernudge>"
+  "wrapper.suffix": "</opencode-supernudge>",
+  "nudge.visible": true,
+  "nudge.visibleMarker": true
 }
 ```
 
@@ -126,6 +128,8 @@ When enabled, the plugin looks for a local config file. If found and valid, the 
 | `nudge.separator` | NO |
 | `nudge.enableTitlePrefix` | NO |
 | `nudge.trim` | NO |
+| `nudge.visible` | YES |
+| `nudge.visibleMarker` | YES |
 | `injection.skipFirstMessageBelowChars` | NO |
 | `injection.subagentInterval` | YES |
 | `injection.subagentAlwaysOnFirst` | YES |
@@ -252,6 +256,25 @@ Use `injection.skipOnRegexMatch` to suppress nudges when text contains markers:
 ```
 </details>
 
+<details>
+<summary><strong>Hidden nudges</strong></summary>
+
+### Hidden nudges
+
+By default the nudge block is prepended/appended into your message text, so it shows up in the chat. Set `nudge.visible` to `false` to keep your message untouched and deliver the nudge as a separate hidden `synthetic` text part instead. The model still sees it; the chat UI does not render it, and it is never written to the session store.
+
+Set `nudge.visibleMarker` to `false` to suppress the `wrapper.prefix`/`wrapper.suffix` marker around each nudge block, even when those strings are non-empty. The nudge text is still injected, just without the wrapper.
+
+Both keys are overridable per-prompt. Both are no-ops for the system-prompt and compaction paths, where you never see the content anyway.
+
+```jsonc
+{
+  "nudge.visible": false,
+  "nudge.visibleMarker": false
+}
+```
+</details>
+
 
 ### Parameters
 | Key | Type | Default | Description |
@@ -272,6 +295,8 @@ Use `injection.skipOnRegexMatch` to suppress nudges when text contains markers:
 | `wrapper.suffix` | `string` | `"</opencode-supernudge>"` | Marker inserted below each nudge block. Empty string disables. |
 | `nudge.separator` | `string` | `"\n\n"` | Separator between multiple nudges within the same block. |
 | `nudge.enableTitlePrefix` | `boolean` | `true` | Prefix each nudge with `[filename]` (lowercase, no extension). |
+| `nudge.visible` | `boolean` | `true` | Deliver the nudge inside the user's message (visible in chat). When `false`, the user message is left untouched and the nudge is delivered as a hidden `synthetic` text part that only the model sees. |
+| `nudge.visibleMarker` | `boolean` | `true` | Emit `wrapper.prefix`/`wrapper.suffix` around each nudge block. When `false`, the wrapper is suppressed even if the strings are non-empty. |
 | `injection.skipFirstMessageBelowChars` | `number` | `3` | Skip injection when user message length `<=` this threshold. |
 | `injection.skipOnRegexMatch` | `string[]` | `[]` | Skip injection if message text matches any regex. |
 | `injection.subagentInterval` | `number` | `1` | Inject every Nth autonomous turn. `1` = every turn. `2` = 1st, skip 2nd, inject 3rd. |

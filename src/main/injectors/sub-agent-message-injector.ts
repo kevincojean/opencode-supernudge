@@ -1,8 +1,15 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import type { ResolvedAutonomousPrompt, TurnBoundMessageInjector, PromptContext, InjectResult } from "../turn-bound-injector.ts"
+import type {
+  ResolvedAutonomousPrompt,
+  TurnBoundMessageInjector,
+  PromptContext,
+  InjectResult,
+  PrimaryInvisibleProvider,
+} from "../turn-bound-injector.ts"
 import { shouldSkipOnRegex } from "./regex-skip.ts"
+import { createSyntheticTextPart, insertSyntheticPart } from "./synthetic-part.ts"
 
-type TextPartTarget = { type: "text"; text: string }
+type TextPartTarget = { type: "text"; text: string; messageID?: string }
 
 function shouldInject(count: number, interval: number, alwaysOnFirst: boolean): boolean {
   if (interval <= 1) return true
@@ -10,11 +17,20 @@ function shouldInject(count: number, interval: number, alwaysOnFirst: boolean): 
   return (count - 1) % interval === 0
 }
 
+function wrapString(content: string, prefix: string, suffix: string): string {
+  const parts: string[] = []
+  if (prefix) parts.push(prefix)
+  parts.push(content)
+  if (suffix) parts.push(suffix)
+  return parts.join("\n")
+}
+
 export class SubAgentMessageInjector implements TurnBoundMessageInjector {
   private counters = new Map<string, number[]>()
   private primarySessions = new Set<string>()
   private resolvePrompts: () => ResolvedAutonomousPrompt[]
   private client: PluginInput["client"] | undefined
+  private primaryInvisibleProvider: PrimaryInvisibleProvider | undefined
 
   constructor(
     resolvePrompts: () => ResolvedAutonomousPrompt[],
@@ -22,6 +38,10 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
   ) {
     this.resolvePrompts = resolvePrompts
     this.client = client
+  }
+
+  setPrimaryInvisibleProvider(fn: PrimaryInvisibleProvider): void {
+    this.primaryInvisibleProvider = fn
   }
 
   incrementTurnCount(sessionID: string, promptIndex: number): number {
@@ -52,6 +72,7 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
     promptIndex: number,
     ctx: PromptContext,
     target: unknown,
+    parts: unknown[] = [],
   ): InjectResult {
     if (!ctx.enabled) return undefined
     const count = this.counters.get(sessionID)?.[promptIndex] ?? 0
@@ -59,8 +80,21 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
     if (!shouldInject(count, ctx.interval, ctx.alwaysOnFirst)) return undefined
     const part = target as TextPartTarget
     if (!part || part.type !== "text") return undefined
-    const titlePrefix = ctx.title ? `[${ctx.title}] ` : ""
-    const block = titlePrefix + ctx.content
+    let block = ctx.title ? `[${ctx.title}] ${ctx.content}` : ctx.content
+    if (ctx.markerEnabled) block = wrapString(block, ctx.prefix, ctx.suffix)
+    if (!ctx.visible) {
+      insertSyntheticPart(
+        parts as Array<{ type: string }>,
+        createSyntheticTextPart({
+          sessionID,
+          messageID: part.messageID ?? "",
+          partKey: `prompt-${promptIndex}`,
+          text: block,
+        }),
+        ctx.position,
+      )
+      return block
+    }
     if (ctx.position === "end") {
       part.text = part.text + "\n\n" + block
     } else {
@@ -79,6 +113,10 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
       position: prompt["position.subagent"],
       content: prompt.content,
       title: prompt.title,
+      visible: prompt["nudge.visible"],
+      markerEnabled: prompt.explicitVisibleMarker,
+      prefix: prompt["wrapper.prefix"],
+      suffix: prompt["wrapper.suffix"],
     }
   }
 
@@ -110,15 +148,38 @@ export class SubAgentMessageInjector implements TurnBoundMessageInjector {
         if (!lastPart || lastPart.type !== "text") return
         const sessionID = (lastMessage.info as { sessionID?: string }).sessionID
         if (!sessionID) return
-        if (this.primarySessions.has(sessionID)) return
         const lastPartText = (lastPart as { text: string }).text
+        const messageID = (lastMessage.info as { id?: string }).id ?? ""
+
+        const deliveries = this.primaryInvisibleProvider?.(sessionID, lastPartText) ?? []
+        if (deliveries.length > 0) {
+          const startParts: ReturnType<typeof createSyntheticTextPart>[] = []
+          const endParts: ReturnType<typeof createSyntheticTextPart>[] = []
+          for (let i = 0; i < deliveries.length; i++) {
+            const delivery = deliveries[i]
+            const part = createSyntheticTextPart({
+              sessionID,
+              messageID,
+              partKey: `normal-${i}`,
+              text: delivery.text,
+            })
+            if (delivery.position === "start") {
+              startParts.push(part)
+            } else {
+              endParts.push(part)
+            }
+          }
+          lastMessage.parts = [...startParts, ...lastMessage.parts, ...endParts]
+        }
+
+        if (this.primarySessions.has(sessionID)) return
         for (let i = 0; i < prompts.length; i++) {
           const prompt = prompts[i]
           if (!prompt["enabled.subagentAutonomousWorkNudge"]) continue
 
           if (shouldSkipOnRegex(lastPartText, prompt["injection.skipOnRegexMatch"], this.client)) continue
 
-          this.inject(sessionID, i, this.ctxFor(prompt, i), lastPart)
+          this.inject(sessionID, i, this.ctxFor(prompt, i), lastPart, lastMessage.parts)
         }
       },
       event: async (input) => {

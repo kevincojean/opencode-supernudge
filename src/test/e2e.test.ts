@@ -31,6 +31,8 @@ type SuperNudgeConfig = {
   "nudge.separator"?: string,
   "nudge.enableTitlePrefix"?: boolean,
   "nudge.trim"?: boolean,
+  "nudge.visible"?: boolean,
+  "nudge.visibleMarker"?: boolean,
   "currentWorkingDirectory.configFilePath"?: string,
   "currentWorkingDirectory.configEnabled"?: boolean,
 }
@@ -190,6 +192,8 @@ function writeNudgeConfig(config: SuperNudgeConfig) {
     "nudge.separator": config["nudge.separator"] ?? "\n\n",
     "nudge.enableTitlePrefix": config["nudge.enableTitlePrefix"] ?? true,
     "nudge.trim": config["nudge.trim"] ?? true,
+    "nudge.visible": config["nudge.visible"] ?? true,
+    "nudge.visibleMarker": config["nudge.visibleMarker"] ?? true,
     "currentWorkingDirectory.configFilePath": config["currentWorkingDirectory.configFilePath"] ?? path.join(supernudgeDir, "supernudge-configuration.jsonc"),
     "currentWorkingDirectory.configEnabled": config["currentWorkingDirectory.configEnabled"] ?? false,
   }
@@ -560,5 +564,21 @@ describe("e2e: SuperNudge acceptance criteria", () => {
     const text = await sendMessage("hello world")
 
     assert.ok(text.includes(NUDGE), `message without pattern must have nudge. Got: ${text}`)
+  })
+
+  test("AC16: given nudge.visibleMarker=false, when message triggers injection, then nudge present but wrapper suppressed", async () => {
+    writeNudgeConfig({ "nudge.visibleMarker": false })
+    const text = await sendMessage("user-text")
+
+    assert.ok(text.includes(NUDGE), `nudge must be injected without wrapper. Got: ${text}`)
+    assert.ok(!text.includes("<opencode-supernudge>"), `wrapper must NOT appear. Got: ${text}`)
+  })
+
+  test("AC17: given nudge.visible=false, when chat.message fires, then user-visible message does NOT contain nudge", async () => {
+    writeNudgeConfig({ "nudge.visible": false })
+    const text = await sendMessage("user-text")
+
+    // Safe to assert absence here: transform-inserted parts are memory-only and never returned by session.messages().
+    assert.ok(!text.includes(NUDGE), `nudge must NOT appear in user-visible message. Got: ${text}`)
   })
 })

@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import { SubAgentMessageInjector } from "./injectors/sub-agent-message-injector.ts"
 import { shouldSkipOnRegex } from "./injectors/regex-skip.ts"
+import type { NormalMessageDelivery } from "./turn-bound-injector.ts"
 
 type Position = "start" | "end"
 
@@ -25,6 +26,8 @@ type PromptConfig = {
   "nudge.separator": string
   "nudge.enableTitlePrefix": boolean
   "nudge.trim": boolean
+  "nudge.visible": boolean
+  "nudge.visibleMarker": boolean
   "injection.skipFirstMessageBelowChars": number
   "injection.subagentInterval": number
   "injection.subagentAlwaysOnFirst": boolean
@@ -40,9 +43,9 @@ type Config = PromptConfig & {
   "currentWorkingDirectory.configEnabled": boolean
 }
 
-type ResolvedPrompt = PromptConfig & { content: string; title: string }
+type ResolvedPrompt = PromptConfig & { content: string; title: string; explicitVisibleMarker: boolean }
 
-const DEFAULTS: Config = {
+export const DEFAULTS: Config = {
   "prompts": [],
   "injection.interval": 1,
   "injection.alwaysOnFirstMessage": true,
@@ -58,6 +61,8 @@ const DEFAULTS: Config = {
   "nudge.separator": "\n\n",
   "nudge.enableTitlePrefix": true,
   "nudge.trim": true,
+  "nudge.visible": true,
+  "nudge.visibleMarker": true,
   "injection.skipFirstMessageBelowChars": 3,
   "enabled.subagentAutonomousWorkNudge": true,
   "injection.subagentInterval": 1,
@@ -159,7 +164,8 @@ function resolvePrompts(
     const content = resolved["nudge.trim"] ? rawContent.trim() : rawContent
     if (content) {
       const title = path.basename(filePath, path.extname(filePath)).toLowerCase()
-      result.push({ ...resolved, content, title })
+      const explicitVisibleMarker = "nudge.visibleMarker" in obj && obj["nudge.visibleMarker"] === true
+      result.push({ ...resolved, content, title, explicitVisibleMarker })
     }
   }
   return result
@@ -191,6 +197,60 @@ const DEFAULT_CONFIG_PATH = path.join(
   ".config/opencode/opencode-supernudge/supernudge-configuration.jsonc",
 )
 
+function computeDeliveries(
+  prompts: ResolvedPrompt[],
+  counts: number[],
+  messageText: string,
+  client: PluginInput["client"],
+  visible: boolean,
+  prefix: string,
+  suffix: string,
+  separator: string,
+): NormalMessageDelivery[] {
+  const startTexts: string[] = []
+  const endTexts: string[] = []
+  let startMarker = false
+  let endMarker = false
+
+  for (let i = 0; i < prompts.length; i++) {
+    const prompt = prompts[i]
+    if (!prompt["enabled.normalMessage"]) continue
+    const count = counts[i] ?? 0
+    const interval = prompt["injection.interval"]
+    const shouldInject =
+      interval <= 1 ||
+      (count === 1
+        ? prompt["injection.alwaysOnFirstMessage"]
+        : (count - 1) % interval === 0)
+    if (!shouldInject) continue
+    if (messageText.length <= prompt["injection.skipFirstMessageBelowChars"]) continue
+    if (shouldSkipOnRegex(messageText, prompt["injection.skipOnRegexMatch"], client)) continue
+    if (prompt["nudge.visible"] !== visible) continue
+
+    const block = withTitle(prompt)
+    if (prompt["position.normalMessage"] === "end") {
+      endTexts.push(block)
+      endMarker = endMarker || prompt["nudge.visibleMarker"]
+    } else {
+      startTexts.push(block)
+      startMarker = startMarker || prompt["nudge.visibleMarker"]
+    }
+  }
+
+  const deliveries: NormalMessageDelivery[] = []
+  if (startTexts.length > 0) {
+    let block = startTexts.join(separator)
+    if (startMarker) block = wrapString(block, prefix, suffix)
+    deliveries.push({ position: "start", text: block })
+  }
+  if (endTexts.length > 0) {
+    let block = endTexts.join(separator)
+    if (endMarker) block = wrapString(block, prefix, suffix)
+    deliveries.push({ position: "end", text: block })
+  }
+  return deliveries
+}
+
 const plugin: Plugin = async (input, options) => {
   const baseDir = input.directory
   const client = input.client
@@ -202,6 +262,16 @@ const plugin: Plugin = async (input, options) => {
   const counters = new Map<string, number[]>()
 
   const subAgentInjector = new SubAgentMessageInjector(() => getMergedNudge(configPath, baseDir, client).prompts, client)
+
+  subAgentInjector.setPrimaryInvisibleProvider((sessionID, messageText) => {
+    const { prompts: resolvedPrompts, prefix, suffix, separator } = getMergedNudge(configPath, baseDir, client)
+    if (resolvedPrompts.length === 0) return []
+
+    const promptCounts = counters.get(sessionID)
+    if (!promptCounts) return []
+
+    return computeDeliveries(resolvedPrompts, promptCounts, messageText, client, false, prefix, suffix, separator)
+  })
 
   return {
     ...subAgentInjector.hooks(),
@@ -216,50 +286,27 @@ const plugin: Plugin = async (input, options) => {
       for (let i = 0; i < promptCounts.length; i++) {
         promptCounts[i]++
       }
+
+      const messageTextPart = output.parts.find(p => p.type === "text" && "text" in p) as { text: string } | undefined
+      const deliveries = computeDeliveries(
+        resolvedPrompts,
+        promptCounts,
+        messageTextPart?.text ?? "",
+        client,
+        true,
+        prefix,
+        suffix,
+        separator,
+      )
       counters.set(input.sessionID, promptCounts)
 
-      const startTexts: string[] = []
-      const endTexts: string[] = []
-
-      const messageText = output.parts.find(p => p.type === "text" && "text" in p)
-        ? ((output.parts.find(p => p.type === "text" && "text" in p) as { text: string }).text)
-        : ""
-      const skipThreshold = (p: ResolvedPrompt) => p["injection.skipFirstMessageBelowChars"]
-
-      for (let i = 0; i < resolvedPrompts.length; i++) {
-        const prompt = resolvedPrompts[i]
-        if (!prompt["enabled.normalMessage"]) continue
-        const count = promptCounts[i]
-        const interval = prompt["injection.interval"]
-        const shouldInject =
-          interval <= 1 ||
-          (count === 1
-            ? prompt["injection.alwaysOnFirstMessage"]
-            : (count - 1) % interval === 0)
-        if (!shouldInject) continue
-        if (messageText.length <= skipThreshold(prompt)) continue
-
-        if (shouldSkipOnRegex(messageText, prompt["injection.skipOnRegexMatch"], client)) continue
-
-        if (prompt["position.normalMessage"] === "end") {
-          endTexts.push(withTitle(prompt))
-        } else {
-          startTexts.push(withTitle(prompt))
-        }
-      }
-
-      let target = output.parts.find(p => p.type === "text" && "text" in p) as { text: string } | undefined
+      const target = output.parts.find(p => p.type === "text" && "text" in p) as { text: string } | undefined
       if (!target) return
 
-      if (startTexts.length > 0) {
-        const block = startTexts.join(separator)
-        const wrapped = wrapString(block, prefix, suffix)
-        target.text = wrapped + "\n\n" + target.text
-      }
-      if (endTexts.length > 0) {
-        const block = endTexts.join(separator)
-        const wrapped = wrapString(block, prefix, suffix)
-        target.text = target.text + "\n\n" + wrapped
+      for (const delivery of deliveries) {
+        target.text = delivery.position === "start"
+          ? delivery.text + "\n\n" + target.text
+          : target.text + "\n\n" + delivery.text
       }
     },
     "experimental.chat.system.transform": async (input, output) => {

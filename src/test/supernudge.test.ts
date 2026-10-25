@@ -5,6 +5,7 @@ import path from "node:path"
 import os from "node:os"
 import type { PluginInput } from "@opencode-ai/plugin"
 import type { Model, Project, UserMessage, Part, TextPart } from "@opencode-ai/sdk"
+import { createSyntheticTextPart, insertSyntheticPart } from "../main/injectors/synthetic-part.ts"
 
 function mkTmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "supernudge-"))
@@ -81,6 +82,8 @@ async function loadPlugin(): Promise<typeof import("../main/index.ts")["default"
   const mod = await import("../main/index.ts")
   return mod.default
 }
+
+type PromptEntryLike = { path: string; "nudge.visible": boolean } | { path: string; "nudge.visibleMarker": boolean }
 
 test(
   "given config with interval=2 and alwaysOnFirstMessage=true and prompt containing NUDGE, when user sends 3 messages, then 1st has NUDGE prepended, 2nd has no nudge, 3rd has NUDGE prepended",
@@ -2034,3 +2037,575 @@ test(
   },
 )
 
+test(
+  "given config with nudge.visible and nudge.visibleMarker defaults absent plus per-prompt overrides, when chat.message fires, then defaults are preserved and injection still happens",
+  async () => {
+    const mod = await import("../main/index.ts")
+    assert.ok("nudge.visible" in mod.DEFAULTS, `DEFAULTS must contain nudge.visible, got: ${JSON.stringify(Object.keys(mod.DEFAULTS))}`)
+    assert.ok("nudge.visibleMarker" in mod.DEFAULTS, `DEFAULTS must contain nudge.visibleMarker, got: ${JSON.stringify(Object.keys(mod.DEFAULTS))}`)
+    assert.strictEqual(mod.DEFAULTS["nudge.visible"], true, `nudge.visible default must be true`)
+    assert.strictEqual(mod.DEFAULTS["nudge.visibleMarker"], true, `nudge.visibleMarker default must be true`)
+    const dir = mkTmp()
+    const p1 = writePrompt(dir, "nudge1.txt", "NUDGE1")
+    const p2 = writePrompt(dir, "nudge2.txt", "NUDGE2")
+    const visibleOverride: PromptEntryLike = { path: p1, "nudge.visible": false }
+    const markerOverride: PromptEntryLike = { path: p2, "nudge.visibleMarker": true }
+    const configPath = writeConfigFile({
+      prompts: [visibleOverride, markerOverride],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const textPart = output.parts.find(p => p.type === "text") as TextPart
+    assert.ok(
+      !textPart.text.includes("NUDGE1"),
+      `prompt with nudge.visible=false must be skipped by chat.message, got: ${textPart.text}`,
+    )
+    assert.ok(
+      textPart.text.includes("NUDGE2"),
+      `second prompt must still inject, got: ${textPart.text}`,
+    )
+    assert.ok(
+      textPart.text.includes("<opencode-supernudge>"),
+      `wrapper must still be present, got: ${textPart.text}`,
+    )
+  },
+)
+
+test("given a synthetic part factory when creating and inserting then id is prt_-prefixed deterministic and insertion respects position", () => {
+  const p = createSyntheticTextPart({
+    sessionID: "ses_abc",
+    messageID: "msg_def",
+    partKey: "nudge-visible",
+    text: "hello-synthetic",
+  })
+  assert.ok(p.id.startsWith("prt_"), `id must start with prt_, got: ${p.id}`)
+  assert.equal(p.synthetic, true)
+  assert.equal(p.type, "text")
+  assert.equal(p.text, "hello-synthetic")
+  assert.equal(p.sessionID, "ses_abc")
+  assert.equal(p.messageID, "msg_def")
+
+  const again = createSyntheticTextPart({
+    sessionID: "ses_abc",
+    messageID: "msg_def",
+    partKey: "nudge-visible",
+    text: "different-text",
+  })
+  assert.equal(again.id, p.id, `same sessionID+partKey must yield same id, got: ${again.id} vs ${p.id}`)
+
+  const partsStart: Array<{ type: string }> = [{ type: "text" }, { type: "file" }]
+  insertSyntheticPart(partsStart, p, "start")
+  assert.equal(partsStart[0], p)
+  assert.equal(partsStart.length, 3)
+  assert.equal(partsStart[1].type, "text")
+  assert.equal(partsStart[2].type, "file")
+
+  const partsEnd: Array<{ type: string }> = [{ type: "text" }, { type: "file" }]
+  insertSyntheticPart(partsEnd, p, "end")
+  assert.equal(partsEnd[partsEnd.length - 1], p)
+  assert.equal(partsEnd.length, 3)
+  assert.equal(partsEnd[0].type, "text")
+  assert.equal(partsEnd[1].type, "file")
+})
+
+test(
+  "given config with nudge.visible=false, when chat.message fires, then user text is untouched",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.visible": false,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello-1")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    assert.strictEqual(
+      (output.parts[0] as TextPart).text,
+      "hello-1",
+      `user text must be untouched, got: ${(output.parts[0] as TextPart).text}`,
+    )
+  },
+)
+
+test(
+  "given config with nudge.visibleMarker=false and non-empty wrapper strings, when chat.message fires, then nudge is injected without wrapper",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.visible": true,
+      "nudge.visibleMarker": false,
+      "wrapper.prefix": "<x>",
+      "wrapper.suffix": "</x>",
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const output = {
+      message: emptyMessage(),
+      parts: [emptyTextPart("hello-1")],
+    }
+    await hooks["chat.message"]!({ sessionID: "s1" }, output)
+
+    const text = (output.parts[0] as TextPart).text
+    assert.ok(text.includes("NUDGE"), `nudge must be present, got: ${text}`)
+    assert.ok(!text.includes("<x>"), `prefix must be suppressed, got: ${text}`)
+    assert.ok(!text.includes("</x>"), `suffix must be suppressed, got: ${text}`)
+  },
+)
+
+test(
+  "given nudge.visible=false with enabled.subagentAutonomousWorkNudge=true, when text.complete then messages.transform fire, then original text part is untouched and a synthetic part contains NUDGE",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "enabled.normalMessage": false,
+      "enabled.subagentSystemPromptNudge": false,
+      "enabled.subagentAutonomousWorkNudge": true,
+      "nudge.visible": false,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    await hooks["experimental.text.complete"]!(
+      { sessionID: "s1", messageID: "m0", partID: "p0" },
+      { text: "assistant-0" },
+    )
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "info1", role: "assistant" },
+          parts: [{ type: "text", text: "assistant-0" }],
+        },
+      ],
+    }
+    await hooks["experimental.chat.messages.transform"]!(
+      {},
+      transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+    )
+
+    const parts = transformOut.messages[0].parts
+    const original = parts.find(p => (p as { synthetic?: boolean }).synthetic !== true) as { text: string }
+    assert.strictEqual(original.text, "assistant-0", `original text part must be untouched, got: ${original.text}`)
+    assert.ok(
+      parts.some(p => (p as { synthetic?: boolean }).synthetic === true && ((p as { text?: string }).text ?? "").includes("NUDGE")),
+      `a synthetic part containing NUDGE must exist, got: ${JSON.stringify(parts)}`,
+    )
+  },
+)
+
+
+test(
+  "given default config on a subagent session, when text.complete then messages.transform fire, then the last text part is exactly the unwrapped nudge block and an explicit per-prompt nudge.visibleMarker=true adds the wrapper",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const plugin = await loadPlugin()
+
+    const autonomousLastText = async (prompts: unknown): Promise<string> => {
+      const configPath = writeConfigFile({
+        prompts,
+        "enabled.normalMessage": false,
+        "enabled.subagentSystemPromptNudge": false,
+        "enabled.subagentAutonomousWorkNudge": true,
+        "wrapper.prefix": "<x>",
+        "wrapper.suffix": "</x>",
+      })
+      const hooks = await plugin(stubInput(), { configPath })
+      await hooks["experimental.text.complete"]!(
+        { sessionID: "s1", messageID: "m0", partID: "p0" },
+        { text: "assistant-0" },
+      )
+      const transformOut = {
+        messages: [
+          {
+            info: { sessionID: "s1", id: "info1", role: "assistant" },
+            parts: [{ type: "text", text: "assistant-0" }],
+          },
+        ],
+      }
+      await hooks["experimental.chat.messages.transform"]!(
+        {},
+        transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+      )
+      return (transformOut.messages[0].parts[0] as { text: string }).text
+    }
+
+    assert.strictEqual(
+      await autonomousLastText([promptPath]),
+      "[nudge] NUDGE\n\nassistant-0",
+      "default autonomous output must stay unwrapped",
+    )
+    assert.strictEqual(
+      await autonomousLastText([{ path: promptPath, "nudge.visibleMarker": true }]),
+      "<x>\n[nudge] NUDGE\n</x>\n\nassistant-0",
+      "explicit per-prompt marker must wrap the autonomous block",
+    )
+  },
+)
+
+
+test(
+  "given nudge.visible=false on a subagent session with non-empty wrapper strings, when nudge.visibleMarker toggles, then the synthetic part is wrapped only when the marker is enabled",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const plugin = await loadPlugin()
+
+    const autonomousSynthetic = async (visibleMarker: boolean): Promise<string> => {
+      const configPath = writeConfigFile({
+        prompts: [{ path: promptPath, "nudge.visibleMarker": visibleMarker }],
+        "enabled.normalMessage": false,
+        "enabled.subagentSystemPromptNudge": false,
+        "enabled.subagentAutonomousWorkNudge": true,
+        "nudge.visible": false,
+        "nudge.visibleMarker": false,
+        "wrapper.prefix": "<x>",
+        "wrapper.suffix": "</x>",
+      })
+      const hooks = await plugin(stubInput(), { configPath })
+      await hooks["experimental.text.complete"]!(
+        { sessionID: "s1", messageID: "m0", partID: "p0" },
+        { text: "assistant-0" },
+      )
+      const transformOut = {
+        messages: [
+          {
+            info: { sessionID: "s1", id: "info1", role: "assistant" },
+            parts: [{ type: "text", text: "assistant-0" }],
+          },
+        ],
+      }
+      await hooks["experimental.chat.messages.transform"]!(
+        {},
+        transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+      )
+      return transformOut.messages[0].parts
+        .filter(p => (p as { synthetic?: boolean }).synthetic === true)
+        .map(p => (p as { text?: string }).text ?? "")
+        .join("\n")
+    }
+
+    const withoutMarker = await autonomousSynthetic(false)
+    assert.ok(withoutMarker.includes("NUDGE"), `nudge must be present, got: ${withoutMarker}`)
+    assert.ok(!withoutMarker.includes("<x>"), `prefix must be suppressed, got: ${withoutMarker}`)
+    assert.ok(!withoutMarker.includes("</x>"), `suffix must be suppressed, got: ${withoutMarker}`)
+
+    const withMarker = await autonomousSynthetic(true)
+    assert.ok(withMarker.includes("NUDGE"), `nudge must be present, got: ${withMarker}`)
+    assert.ok(withMarker.includes("<x>"), `prefix must be emitted, got: ${withMarker}`)
+    assert.ok(withMarker.includes("</x>"), `suffix must be emitted, got: ${withMarker}`)
+  },
+)
+
+
+test(
+  "given nudge.visible=false and enabled.subagentAutonomousWorkNudge=false, when chat.message then experimental.chat.messages.transform fire for a primary session, then the model sees a synthetic NUDGE part and the user text is untouched",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.visible": false,
+      "enabled.subagentAutonomousWorkNudge": false,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const chatOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, chatOut)
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "m1", role: "user" },
+          parts: [{ type: "text", text: "hello-1" }],
+        },
+      ],
+    }
+    await hooks["experimental.chat.messages.transform"]!(
+      {},
+      transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+    )
+
+    const parts = transformOut.messages[0].parts
+    assert.strictEqual(parts.length, 2, `exactly 2 parts expected, got: ${JSON.stringify(parts)}`)
+    const synthetic = parts.find(p => (p as { synthetic?: boolean }).synthetic === true)
+    assert.ok(synthetic, `a synthetic part must be present, got: ${JSON.stringify(parts)}`)
+    assert.ok(
+      ((synthetic as { text?: string }).text ?? "").includes("NUDGE"),
+      `synthetic part must contain NUDGE, got: ${JSON.stringify(parts)}`,
+    )
+    const original = parts.find(p => (p as { synthetic?: boolean }).synthetic !== true) as { text: string }
+    assert.strictEqual(original.text, "hello-1", `user text must be untouched, got: ${original.text}`)
+  },
+)
+
+test(
+  "given nudge.visible=false with injection.interval=2 and injection.alwaysOnFirstMessage=true, when three chat.message then messages.transform rounds fire, then the synthetic nudge appears on rounds 1 and 3 but not round 2",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.visible": false,
+      "injection.interval": 2,
+      "injection.alwaysOnFirstMessage": true,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const hasSyntheticNudge = async (round: number): Promise<boolean> => {
+      const chatOut = { message: emptyMessage(), parts: [emptyTextPart("hello world round")] }
+      await hooks["chat.message"]!({ sessionID: "s1" }, chatOut)
+      const transformOut = {
+        messages: [
+          {
+            info: { sessionID: "s1", id: `m${round}`, role: "user" },
+            parts: [{ type: "text", text: "hello world round" }],
+          },
+        ],
+      }
+      await hooks["experimental.chat.messages.transform"]!(
+        {},
+        transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+      )
+      return transformOut.messages[0].parts.some(
+        p => (p as { synthetic?: boolean }).synthetic === true
+          && ((p as { text?: string }).text ?? "").includes("NUDGE"),
+      )
+    }
+
+    assert.strictEqual(await hasSyntheticNudge(1), true, "round 1 must deliver a synthetic nudge")
+    assert.strictEqual(await hasSyntheticNudge(2), false, "round 2 must not deliver a synthetic nudge")
+    assert.strictEqual(await hasSyntheticNudge(3), true, "round 3 must deliver a synthetic nudge")
+  },
+)
+
+test(
+  "given nudge.visible=true, when chat.message then experimental.chat.messages.transform fire, then no part marked synthetic is added",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.visible": true,
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const chatOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, chatOut)
+
+    const transformOut = {
+      messages: [
+        {
+          info: { sessionID: "s1", id: "m1", role: "user" },
+          parts: [{ type: "text", text: "hello-1" }],
+        },
+      ],
+    }
+    await hooks["experimental.chat.messages.transform"]!(
+      {},
+      transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+    )
+
+    assert.ok(
+      !transformOut.messages[0].parts.some(p => (p as { synthetic?: boolean }).synthetic === true),
+      `no synthetic part must be added, got: ${JSON.stringify(transformOut.messages[0].parts)}`,
+    )
+  },
+)
+
+function syntheticText(parts: unknown[]): string {
+  return parts
+    .filter(p => (p as { synthetic?: boolean }).synthetic === true)
+    .map(p => (p as { text?: string }).text ?? "")
+    .join("\n")
+}
+
+test(
+  "given same prompt and turn index with only nudge.visible differing, when chat.message and messages.transform fire, then the model receives identical nudge text",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const plugin = await loadPlugin()
+
+    const visibleHooks = await plugin(stubInput(), {
+      configPath: writeConfigFile({
+        prompts: [promptPath],
+        "nudge.visible": true,
+        "enabled.subagentAutonomousWorkNudge": false,
+      }),
+    })
+    const visibleOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await visibleHooks["chat.message"]!({ sessionID: "s1" }, visibleOut)
+    const visibleText = (visibleOut.parts[0] as TextPart).text
+    const visibleInjected = visibleText.split("hello-1").join("").trim()
+
+    const invisibleHooks = await plugin(stubInput(), {
+      configPath: writeConfigFile({
+        prompts: [promptPath],
+        "nudge.visible": false,
+        "enabled.subagentAutonomousWorkNudge": false,
+      }),
+    })
+    const invisibleOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await invisibleHooks["chat.message"]!({ sessionID: "s1" }, invisibleOut)
+    assert.strictEqual(
+      (invisibleOut.parts[0] as TextPart).text,
+      "hello-1",
+      `invisible path must leave user text untouched, got: ${(invisibleOut.parts[0] as TextPart).text}`,
+    )
+
+    const transformOut = {
+      messages: [{ info: { sessionID: "s1", id: "m1", role: "user" }, parts: [{ type: "text", text: "hello-1" }] }],
+    }
+    await invisibleHooks["experimental.chat.messages.transform"]!(
+      {},
+      transformOut as unknown as Parameters<NonNullable<typeof invisibleHooks["experimental.chat.messages.transform"]>>[1],
+    )
+    const invisibleInjected = syntheticText(transformOut.messages[0].parts).trim()
+
+    assert.strictEqual(
+      invisibleInjected,
+      visibleInjected,
+      `model-visible nudge text must match across nudge.visible values. visible: ${JSON.stringify(visibleInjected)} invisible: ${JSON.stringify(invisibleInjected)}`,
+    )
+  },
+)
+
+test(
+  "given one start and one end prompt with nudge.visible=false, when chat.message then messages.transform fire, then parts are [syntheticStart, originalText, syntheticEnd] with one block per prompt",
+  async () => {
+    const pStart = createTempPrompts("NUDGE_START")
+    const pEnd = createTempPrompts("NUDGE_END")
+    const plugin = await loadPlugin()
+
+    const invisibleHooks = await plugin(stubInput(), {
+      configPath: writeConfigFile({
+        prompts: [{ path: pStart }, { path: pEnd, "position.normalMessage": "end" }],
+        "nudge.visible": false,
+      }),
+    })
+    const chatOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await invisibleHooks["chat.message"]!({ sessionID: "s1" }, chatOut)
+    assert.strictEqual((chatOut.parts[0] as TextPart).text, "hello-1", `invisible path must leave user text untouched`)
+
+    const invisibleOut = {
+      messages: [{ info: { sessionID: "s1", id: "m1", role: "user" }, parts: [{ type: "text", text: "hello-1" }] }],
+    }
+    await invisibleHooks["experimental.chat.messages.transform"]!(
+      {},
+      invisibleOut as unknown as Parameters<NonNullable<typeof invisibleHooks["experimental.chat.messages.transform"]>>[1],
+    )
+    const parts = invisibleOut.messages[0].parts as Array<{ type?: string; text?: string; synthetic?: boolean }>
+    assert.deepStrictEqual(
+      parts.map(p => (p.synthetic === true ? "synthetic" : "original")),
+      ["synthetic", "original", "synthetic"],
+      `expected [syntheticStart, originalText, syntheticEnd], got: ${JSON.stringify(parts)}`,
+    )
+    assert.strictEqual(parts[1].text, "hello-1", `original text must stay in the middle, got: ${parts[1].text}`)
+    const syntheticParts = parts.filter(p => p.synthetic === true)
+    const withStart = syntheticParts.filter(p => (p.text ?? "").includes("NUDGE_START"))
+    const withEnd = syntheticParts.filter(p => (p.text ?? "").includes("NUDGE_END"))
+    assert.strictEqual(withStart.length, 1, `exactly one synthetic part must contain NUDGE_START, got: ${JSON.stringify(syntheticParts)}`)
+    assert.strictEqual(withEnd.length, 1, `exactly one synthetic part must contain NUDGE_END, got: ${JSON.stringify(syntheticParts)}`)
+    assert.ok(withStart[0].text!.includes("NUDGE_START") && !withStart[0].text!.includes("NUDGE_END"), `start block must not contain end content: ${withStart[0].text}`)
+    assert.ok(withEnd[0].text!.includes("NUDGE_END") && !withEnd[0].text!.includes("NUDGE_START"), `end block must not contain start content: ${withEnd[0].text}`)
+
+    const visibleHooks = await plugin(stubInput(), {
+      configPath: writeConfigFile({
+        prompts: [{ path: pStart }, { path: pEnd, "position.normalMessage": "end" }],
+        "nudge.visible": true,
+      }),
+    })
+    const visibleOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await visibleHooks["chat.message"]!({ sessionID: "s1" }, visibleOut)
+    const visibleText = (visibleOut.parts[0] as TextPart).text
+    const startAt = visibleText.indexOf("NUDGE_START")
+    const endAt = visibleText.indexOf("NUDGE_END")
+    assert.ok(startAt >= 0, `visible text must contain start prompt, got: ${visibleText}`)
+    assert.ok(endAt >= 0, `visible text must contain end prompt, got: ${visibleText}`)
+    assert.ok(startAt < endAt, `start prompt must precede end prompt, got: ${visibleText}`)
+  },
+)
+
+test(
+  "given nudge.visible=false and injection.skipOnRegexMatch matching SKIPME, when chat.message then messages.transform fire with SKIPME, then no synthetic part is added and user text is untouched",
+  async () => {
+    const promptPath = createTempPrompts("NUDGE")
+    const configPath = writeConfigFile({
+      prompts: [promptPath],
+      "nudge.visible": false,
+      "injection.skipOnRegexMatch": ["SKIPME"],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const chatOut = { message: emptyMessage(), parts: [emptyTextPart("SKIPME please")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, chatOut)
+    assert.strictEqual((chatOut.parts[0] as TextPart).text, "SKIPME please", `user text must be untouched`)
+
+    const transformOut = {
+      messages: [{ info: { sessionID: "s1", id: "m1", role: "user" }, parts: [{ type: "text", text: "SKIPME please" }] }],
+    }
+    await hooks["experimental.chat.messages.transform"]!(
+      {},
+      transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+    )
+
+    const parts = transformOut.messages[0].parts as Array<{ text?: string; synthetic?: boolean }>
+    assert.strictEqual(
+      parts.filter(p => p.synthetic === true).length,
+      0,
+      `no synthetic part must be added, got: ${JSON.stringify(parts)}`,
+    )
+    assert.strictEqual(parts.length, 1, `only the original part must remain, got: ${JSON.stringify(parts)}`)
+    assert.strictEqual(parts[0].text, "SKIPME please", `text part must still be SKIPME please, got: ${parts[0].text}`)
+  },
+)
+
+test(
+  "given global nudge.visible=true with one prompt overriding nudge.visible=false, when chat.message then messages.transform fire, then the visible text carries only the visible prompt and one synthetic part carries the invisible prompt",
+  async () => {
+    const dir = mkTmp()
+    const pInvisible = writePrompt(dir, "invisible.txt", "NUDGE_INVISIBLE")
+    const pVisible = writePrompt(dir, "visible.txt", "NUDGE_VISIBLE")
+    const configPath = writeConfigFile({
+      "nudge.visible": true,
+      prompts: [{ path: pInvisible, "nudge.visible": false }, { path: pVisible }],
+    })
+    const plugin = await loadPlugin()
+    const hooks = await plugin(stubInput(), { configPath })
+
+    const chatOut = { message: emptyMessage(), parts: [emptyTextPart("hello-1")] }
+    await hooks["chat.message"]!({ sessionID: "s1" }, chatOut)
+    const userText = (chatOut.parts[0] as TextPart).text
+    assert.ok(userText.includes("NUDGE_VISIBLE"), `visible prompt must be in user text, got: ${userText}`)
+    assert.ok(!userText.includes("NUDGE_INVISIBLE"), `invisible prompt must not be in user text, got: ${userText}`)
+
+    const transformOut = {
+      messages: [{ info: { sessionID: "s1", id: "m1", role: "user" }, parts: [{ type: "text", text: "hello-1" }] }],
+    }
+    await hooks["experimental.chat.messages.transform"]!(
+      {},
+      transformOut as unknown as Parameters<NonNullable<typeof hooks["experimental.chat.messages.transform"]>>[1],
+    )
+
+    const parts = transformOut.messages[0].parts as Array<{ text?: string; synthetic?: boolean }>
+    const syntheticParts = parts.filter(p => p.synthetic === true)
+    const withInvisible = syntheticParts.filter(p => (p.text ?? "").includes("NUDGE_INVISIBLE"))
+    assert.strictEqual(withInvisible.length, 1, `exactly one synthetic part must carry NUDGE_INVISIBLE, got: ${JSON.stringify(parts)}`)
+    assert.ok(!syntheticText(parts).includes("NUDGE_VISIBLE"), `visible prompt must not be duplicated as synthetic, got: ${JSON.stringify(parts)}`)
+  },
+)
